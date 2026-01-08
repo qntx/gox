@@ -1,0 +1,86 @@
+name: Cross-Compile Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          # Linux
+          - { os: linux, arch: amd64 }
+          - { os: linux, arch: arm64 }
+          - { os: linux, arch: 386 }
+          - { os: linux, arch: arm }
+          - { os: linux, arch: riscv64 }
+          - { os: linux, arch: loong64 }
+          - { os: linux, arch: ppc64 }
+          - { os: linux, arch: ppc64le }
+          - { os: linux, arch: s390x }
+          - { os: linux, arch: mips64 }
+          - { os: linux, arch: mips64le }
+          - { os: linux, arch: mipsle }
+          - { os: linux, arch: mips }
+          # macOS
+          - { os: darwin, arch: amd64 }
+          - { os: darwin, arch: arm64 }
+          # Windows
+          - { os: windows, arch: amd64 }
+          - { os: windows, arch: 386 }
+          - { os: windows, arch: arm64 }
+          # FreeBSD
+          - { os: freebsd, arch: amd64 }
+          - { os: freebsd, arch: arm64 }
+          - { os: freebsd, arch: 386 }
+          - { os: freebsd, arch: arm }
+          # NetBSD
+          - { os: netbsd, arch: amd64 }
+          - { os: netbsd, arch: arm64 }
+          - { os: netbsd, arch: 386 }
+          - { os: netbsd, arch: arm }
+          # OpenBSD
+          - { os: openbsd, arch: amd64 }
+          - { os: openbsd, arch: arm64 }
+          - { os: openbsd, arch: 386 }
+          - { os: openbsd, arch: arm }
+          # DragonFly BSD
+          - { os: dragonfly, arch: amd64 }
+          # Solaris/illumos
+          - { os: solaris, arch: amd64 }
+          - { os: illumos, arch: amd64 }
+          # iOS
+          - { os: ios, arch: arm64 }
+          - { os: ios, arch: amd64 }
+          # Android
+          - { os: android, arch: arm64 }
+          - { os: android, arch: amd64 }
+          - { os: android, arch: 386 }
+          - { os: android, arch: arm }
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+
+      - name: Build gox
+        run: go build -o gox ./cmd/gox/
+
+      - name: Cross-compile example/minimal
+        run: |
+          ./gox build --os ${{ matrix.target.os }} --arch ${{ matrix.target.arch }} -v -o minimal-${{ matrix.target.os }}-${{ matrix.target.arch }} ./example/minimal
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: minimal-${{ matrix.target.os }}-${{ matrix.target.arch }}
+          path: minimal-${{ matrix.target.os }}-${{ matrix.target.arch }}*
+          retention-days: 1
