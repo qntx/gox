@@ -1,16 +1,31 @@
 # zlib CGO Example
 
-Compression using zlib with cross-compilation.
+Compression using zlib. Demonstrates linking external C libraries.
 
-## Build
+> **Note**: Cross-compiling with external C libraries requires target platform headers and libraries.
+
+## Native Build
 
 ```bash
-# Linux
-gox build --os linux --arch amd64 -lz
+gox build -lz
+```
 
-# Linux static
-gox build --os linux --arch amd64 --linkmode static -lz
+## Cross-Compile
 
-# macOS
-gox build --os darwin --arch arm64 -lz
+Requires pre-built zlib for target platform:
+
+```bash
+gox build --os linux --arch amd64 \
+    -I /path/to/linux-amd64/include \
+    -L /path/to/linux-amd64/lib \
+    -lz
+```
+
+## Static Linking
+
+```bash
+gox build --os linux --arch amd64 --linkmode static \
+    -I /path/to/linux-amd64/include \
+    -L /path/to/linux-amd64/lib \
+    -lz
 ```
