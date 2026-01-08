@@ -58,7 +58,7 @@ jobs:
           ./gox build --os ${{ matrix.target.os }} --arch ${{ matrix.target.arch }} -v -o minimal-${{ matrix.target.os }}-${{ matrix.target.arch }} ./example/minimal
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: minimal-${{ matrix.target.os }}-${{ matrix.target.arch }}
           path: minimal-${{ matrix.target.os }}-${{ matrix.target.arch }}*
