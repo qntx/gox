@@ -145,4 +145,4 @@ Working examples are available in the [examples/](./example) directory:
 
 ## License
 
-Gox has BSD 3-Clause License, see LICENSE.
+Gox has BSD 3-Clause License, see [LICENSE](./LICENSE).

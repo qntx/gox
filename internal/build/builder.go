@@ -25,7 +25,7 @@ func (b *Builder) Run(ctx context.Context, packages []string) error {
 
 	if b.opts.Verbose {
 		fmt.Fprintf(os.Stderr, "env: %v\n", env)
-		fmt.Fprintf(os.Stderr, "go build %s\n", strings.Join(args, " "))
+		fmt.Fprintf(os.Stderr, "go %s\n", strings.Join(args, " "))
 	}
 
 	cmd := exec.CommandContext(ctx, "go", args...)
