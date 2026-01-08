@@ -5,7 +5,7 @@ Cross-platform CGO build tool powered by Zig.
 ## Install
 
 ```bash
-go install gox.qntx.fun@latest
+go install github.com/qntx/gox/cmd/gox@latest
 ```
 
 ## Usage

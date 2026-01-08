@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/qntx/gox/internal/build"
+	"github.com/qntx/gox/internal/prompt"
+	"github.com/qntx/gox/internal/zig"
 	"github.com/spf13/cobra"
-	"gox.qntx.fun/internal/build"
-	"gox.qntx.fun/internal/prompt"
-	"gox.qntx.fun/internal/zig"
 )
 
 var buildOpts = &build.Options{}

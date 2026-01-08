@@ -1,4 +1,4 @@
-module gox.qntx.fun/example/sqlite
+module github.com/qntx/gox/example/sqlite
 
 go 1.25
 

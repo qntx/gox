@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/huh"
-	"gox.qntx.fun/internal/build"
+	"github.com/qntx/gox/internal/build"
 )
 
 var targets = []struct {

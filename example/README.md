@@ -14,7 +14,7 @@ Common CGO cross-compilation scenarios.
 
 ```bash
 # Install gox
-go install gox.qntx.fun@latest
+go install github.com/qntx/gox/cmd/gox@latest
 
 # Build minimal example for Linux
 cd minimal

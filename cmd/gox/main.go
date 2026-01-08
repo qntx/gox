@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"gox.qntx.fun/internal/cmd"
+	"github.com/qntx/gox/internal/cmd"
 )
 
 func main() {
