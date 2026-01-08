@@ -13,18 +13,26 @@ var (
 		"arm":      "arm",
 		"riscv64":  "riscv64",
 		"loong64":  "loongarch64",
+		"ppc64":    "powerpc64",
 		"ppc64le":  "powerpc64le",
 		"s390x":    "s390x",
+		"mips64":   "mips64",
 		"mips64le": "mips64el",
+		"mips":     "mips",
+		"mipsle":   "mipsel",
 	}
 	goosToZig = map[string]string{
-		"linux":   "linux-gnu",
-		"darwin":  "macos",
-		"windows": "windows-gnu",
-		"freebsd": "freebsd",
-		"netbsd":  "netbsd",
-		"openbsd": "openbsd",
-		"android": "linux-android",
+		"linux":     "linux-gnu",
+		"darwin":    "macos",
+		"windows":   "windows-gnu",
+		"freebsd":   "freebsd",
+		"netbsd":    "netbsd",
+		"openbsd":   "openbsd",
+		"dragonfly": "dragonfly",
+		"solaris":   "solaris",
+		"illumos":   "solaris",
+		"ios":       "ios",
+		"android":   "linux-android",
 	}
 )
 
