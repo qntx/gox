@@ -37,10 +37,6 @@ var targets = []struct {
 	{"netbsd/arm64", "netbsd", "arm64"},
 	{"netbsd/386", "netbsd", "386"},
 	{"netbsd/arm", "netbsd", "arm"},
-	// Android
-	{"android/arm64", "android", "arm64"},
-	{"android/amd64", "android", "amd64"},
-	{"android/386", "android", "386"},
 }
 
 var linkModes = []struct {

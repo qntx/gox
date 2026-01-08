@@ -99,7 +99,7 @@ Manage Zig compiler installations cached in `~/.cache/gox/zig/`.
 | **Solaris** | amd64 | amd64 | — |
 | **illumos** | amd64 | amd64 | — |
 | **iOS** | amd64, arm64 | amd64, arm64 | — |
-| **Android** | amd64, 386, arm, arm64 | amd64, arm64, 386, arm | arm64, amd64, 386 |
+| **Android** | amd64, 386, arm, arm64 | amd64, arm64, 386, arm | — |
 
 ### Unsupported Targets
 
@@ -115,7 +115,7 @@ Manage Zig compiler installations cached in `~/.cache/gox/zig/`.
 | `solaris/*`, `illumos/*` | Zig does not recognize Solaris as a valid target OS |
 | `ios/*` | Zig does not ship iOS SDK headers |
 | `freebsd/arm*` | Go linker requires `ld.bfd` for FreeBSD ARM |
-| `android/arm` | Zig does not support `-mfloat-abi=hard` required by Go |
+| `android/*` | Zig does not ship Android NDK headers |
 | `darwin/arm64` | Go runtime requires CoreFoundation framework unavailable in Zig |
 
 ## How It Works

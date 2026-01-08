@@ -22,7 +22,6 @@ var (
 		"windows": "windows-gnu",
 		"freebsd": "freebsd",
 		"netbsd":  "netbsd",
-		"android": "linux-android",
 	}
 )
 

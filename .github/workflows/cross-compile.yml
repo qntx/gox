@@ -36,10 +36,6 @@ jobs:
           - { os: netbsd, arch: arm64 }
           - { os: netbsd, arch: 386 }
           - { os: netbsd, arch: arm }
-          # Android
-          - { os: android, arch: arm64 }
-          - { os: android, arch: amd64 }
-          - { os: android, arch: 386 }
 
     steps:
       - uses: actions/checkout@v6
