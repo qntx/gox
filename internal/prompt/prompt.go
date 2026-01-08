@@ -17,6 +17,7 @@ var targets = []struct {
 	{"linux/arm64", "linux", "arm64"},
 	{"linux/386", "linux", "386"},
 	{"linux/arm", "linux", "arm"},
+	{"linux/riscv64", "linux", "riscv64"},
 	{"darwin/amd64", "darwin", "amd64"},
 	{"darwin/arm64", "darwin", "arm64"},
 	{"windows/amd64", "windows", "amd64"},

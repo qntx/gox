@@ -54,17 +54,20 @@ func (o *Options) Validate() error {
 }
 
 func (o *Options) ZigTarget() string {
-	return zigTarget(o.GOOS, o.GOARCH)
-}
-
-func zigTarget(goos, goarch string) string {
-	arch := goarchToZig[goarch]
+	arch := goarchToZig[o.GOARCH]
 	if arch == "" {
-		arch = goarch
+		arch = o.GOARCH
 	}
-	osTarget := goosToZig[goos]
+	osTarget := goosToZig[o.GOOS]
 	if osTarget == "" {
-		osTarget = goos
+		osTarget = o.GOOS
+	}
+	if o.LinkMode == "static" && o.GOOS == "linux" {
+		if o.GOARCH == "arm" {
+			osTarget = "linux-musleabihf"
+		} else {
+			osTarget = "linux-musl"
+		}
 	}
 	return arch + "-" + osTarget
 }
