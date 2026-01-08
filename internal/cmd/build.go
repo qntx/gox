@@ -35,7 +35,7 @@ func init() {
 }
 
 func runBuild(cmd *cobra.Command, args []string) error {
-	if buildOpts.Interactive || needsInteractive(buildOpts) {
+	if buildOpts.Interactive || (buildOpts.GOOS == "" && buildOpts.GOARCH == "") {
 		opts, err := prompt.Run(buildOpts)
 		if err != nil {
 			return fmt.Errorf("prompt: %w", err)
@@ -58,8 +58,4 @@ func runBuild(cmd *cobra.Command, args []string) error {
 
 	builder := build.New(zigPath, buildOpts)
 	return builder.Run(cmd.Context(), args)
-}
-
-func needsInteractive(opts *build.Options) bool {
-	return opts.GOOS == "" && opts.GOARCH == ""
 }

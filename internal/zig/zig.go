@@ -77,14 +77,10 @@ func (v *Version) UnmarshalJSON(data []byte) error {
 }
 
 func Ensure(ctx context.Context, version string) (string, error) {
-	cache, err := cacheRoot()
-	if err != nil {
-		return "", err
-	}
-
 	if version == "" {
 		version = "master"
 	}
+	cache := cacheRoot()
 
 	zigDir := filepath.Join(cache, zigSubdir, version)
 	zigBin := filepath.Join(zigDir, "zig")
@@ -123,12 +119,12 @@ func Ensure(ctx context.Context, version string) (string, error) {
 	return zigDir, nil
 }
 
-func cacheRoot() (string, error) {
+func cacheRoot() string {
 	dir, err := os.UserCacheDir()
 	if err != nil {
 		dir = os.TempDir()
 	}
-	return filepath.Join(dir, cacheDir), nil
+	return filepath.Join(dir, cacheDir)
 }
 
 func fetchIndex(ctx context.Context) (Index, error) {
@@ -210,11 +206,7 @@ func download(ctx context.Context, url, destDir string) error {
 		return err
 	}
 
-	if err := extract(tmpFile, destDir); err != nil {
-		return err
-	}
-
-	return nil
+	return extract(tmpFile, destDir)
 }
 
 func archiveExt(url string) string {

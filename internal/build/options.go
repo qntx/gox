@@ -45,10 +45,12 @@ func (o *Options) Validate() error {
 	if o.LinkMode == "" {
 		o.LinkMode = "auto"
 	}
-	if o.LinkMode != "static" && o.LinkMode != "dynamic" && o.LinkMode != "auto" {
+	switch o.LinkMode {
+	case "static", "dynamic", "auto":
+		return nil
+	default:
 		return errors.New("linkmode must be: static, dynamic, or auto")
 	}
-	return nil
 }
 
 func (o *Options) ZigTarget() string {
@@ -60,9 +62,9 @@ func zigTarget(goos, goarch string) string {
 	if arch == "" {
 		arch = goarch
 	}
-	os := goosToZig[goos]
-	if os == "" {
-		os = goos
+	osTarget := goosToZig[goos]
+	if osTarget == "" {
+		osTarget = goos
 	}
-	return arch + "-" + os
+	return arch + "-" + osTarget
 }

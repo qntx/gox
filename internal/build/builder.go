@@ -38,40 +38,45 @@ func (b *Builder) Run(ctx context.Context, packages []string) error {
 
 func (b *Builder) buildEnv() []string {
 	target := b.opts.ZigTarget()
-	cc := b.zigCC(target)
-	cxx := b.zigCXX(target)
-
 	env := []string{
 		"CGO_ENABLED=1",
 		"GOOS=" + b.opts.GOOS,
 		"GOARCH=" + b.opts.GOARCH,
-		"CC=" + cc,
-		"CXX=" + cxx,
+		"CC=" + b.zigCC(target),
+		"CXX=" + b.zigCXX(target),
 	}
-
-	if len(b.opts.IncludeDirs) > 0 {
-		cflags := make([]string, len(b.opts.IncludeDirs))
-		for i, dir := range b.opts.IncludeDirs {
-			cflags[i] = "-I" + dir
-		}
-		env = append(env, "CGO_CFLAGS="+strings.Join(cflags, " "))
+	if cflags := b.cgoCflags(); cflags != "" {
+		env = append(env, "CGO_CFLAGS="+cflags)
 	}
-
-	if len(b.opts.LibDirs) > 0 || len(b.opts.Libs) > 0 {
-		var ldflags []string
-		for _, dir := range b.opts.LibDirs {
-			ldflags = append(ldflags, "-L"+dir)
-		}
-		for _, lib := range b.opts.Libs {
-			ldflags = append(ldflags, "-l"+lib)
-		}
-		if b.opts.LinkMode == "static" {
-			ldflags = append(ldflags, "-static")
-		}
-		env = append(env, "CGO_LDFLAGS="+strings.Join(ldflags, " "))
+	if ldflags := b.cgoLdflags(); ldflags != "" {
+		env = append(env, "CGO_LDFLAGS="+ldflags)
 	}
-
 	return env
+}
+
+func (b *Builder) cgoCflags() string {
+	if len(b.opts.IncludeDirs) == 0 {
+		return ""
+	}
+	flags := make([]string, len(b.opts.IncludeDirs))
+	for i, dir := range b.opts.IncludeDirs {
+		flags[i] = "-I" + dir
+	}
+	return strings.Join(flags, " ")
+}
+
+func (b *Builder) cgoLdflags() string {
+	var flags []string
+	for _, dir := range b.opts.LibDirs {
+		flags = append(flags, "-L"+dir)
+	}
+	for _, lib := range b.opts.Libs {
+		flags = append(flags, "-l"+lib)
+	}
+	if b.opts.LinkMode == "static" {
+		flags = append(flags, "-static")
+	}
+	return strings.Join(flags, " ")
 }
 
 func (b *Builder) buildArgs(packages []string) []string {
