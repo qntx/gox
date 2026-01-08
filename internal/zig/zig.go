@@ -231,3 +231,30 @@ func (p *progressReader) Read(b []byte) (int, error) {
 	}
 	return n, err
 }
+
+func Path(version string) string {
+	return filepath.Join(cacheRoot(), zigSubdir, version)
+}
+
+func Installed() ([]string, error) {
+	zigDir := filepath.Join(cacheRoot(), zigSubdir)
+	entries, err := os.ReadDir(zigDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var versions []string
+	for _, e := range entries {
+		if e.IsDir() {
+			versions = append(versions, e.Name())
+		}
+	}
+	return versions, nil
+}
+
+func Remove(version string) error {
+	return os.RemoveAll(Path(version))
+}

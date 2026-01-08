@@ -7,7 +7,10 @@ import (
 var rootCmd = &cobra.Command{
 	Use:   "gox",
 	Short: "Cross-platform CGO build tool powered by Zig",
-	Long:  `gox simplifies CGO cross-compilation by leveraging Zig's C/C++ toolchain.`,
+	Long: `gox simplifies CGO cross-compilation by leveraging Zig's C/C++ toolchain.
+
+Update gox:  go install github.com/qntx/gox/cmd/gox@latest
+Update zig:  gox zig update`,
 }
 
 func Execute() error {
