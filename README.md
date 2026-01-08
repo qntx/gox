@@ -89,17 +89,17 @@ Manage Zig compiler installations cached in `~/.cache/gox/zig/`.
 
 | OS | Go | Zig | gox |
 | :--- | :--- | :--- | :--- |
-| **Linux** | amd64, arm64, 386, arm, riscv64, loong64, mips64, mips64le, ppc64, ppc64le, s390x, mips, mipsle | amd64, arm64, 386, arm, riscv64, loong64, mips64, mips64le, ppc64, ppc64le, s390x, mips, mipsle | amd64, arm64, 386, arm, riscv64, loong64, mips64, mips64le, ppc64, ppc64le, s390x, mips, mipsle |
+| **Linux** | amd64, arm64, 386, arm, riscv64, loong64, mips64, mips64le, ppc64, ppc64le, s390x, mips, mipsle | amd64, arm64, 386, arm, riscv64, loong64, mips64, mips64le, ppc64, ppc64le, s390x, mips, mipsle | amd64, arm64, 386, arm, riscv64, loong64, ppc64le, s390x |
 | **macOS** | amd64, arm64 | amd64, arm64 | amd64, arm64 |
 | **Windows** | amd64, 386, arm64 | amd64, 386, arm64 | amd64, 386, arm64 |
-| **FreeBSD** | amd64, 386, arm, arm64, riscv64 | amd64, arm64, 386, arm | amd64, arm64, 386, arm |
+| **FreeBSD** | amd64, 386, arm, arm64, riscv64 | amd64, arm64, 386, arm | amd64, 386 |
 | **NetBSD** | amd64, 386, arm, arm64 | amd64, arm64, 386, arm | amd64, arm64, 386, arm |
-| **OpenBSD** | amd64, 386, arm, arm64, ppc64, riscv64 | amd64, arm64, 386, arm | amd64, arm64, 386, arm |
-| **DragonFly** | amd64 | amd64 | amd64 |
-| **Solaris** | amd64 | amd64 | amd64 |
-| **illumos** | amd64 | amd64 | amd64 |
-| **iOS** | amd64, arm64 | amd64, arm64 | amd64, arm64 |
-| **Android** | amd64, 386, arm, arm64 | amd64, arm64, 386, arm | amd64, arm64, 386, arm |
+| **OpenBSD** | amd64, 386, arm, arm64, ppc64, riscv64 | amd64, arm64, 386, arm | — |
+| **DragonFly** | amd64 | amd64 | — |
+| **Solaris** | amd64 | amd64 | — |
+| **illumos** | amd64 | amd64 | — |
+| **iOS** | amd64, arm64 | amd64, arm64 | — |
+| **Android** | amd64, 386, arm, arm64 | amd64, arm64, 386, arm | arm64, amd64, 386 |
 
 ### Unsupported Targets
 
@@ -107,20 +107,15 @@ Manage Zig compiler installations cached in `~/.cache/gox/zig/`.
 | :--- | :--- |
 | `js/wasm`, `wasip1/wasm` | WebAssembly does not support CGO |
 | `plan9/*` | Plan 9 does not support CGO |
-| `aix/ppc64` | Zig does not provide AIX libc support |
-
-### Static Linking
-
-| OS | Support | Notes |
-| :--- | :---: | :--- |
-| Linux | ✅ | Automatically uses musl libc for fully static binaries |
-| Windows | ✅ | mingw-w64 provides full static linking support |
-| FreeBSD | ✅ | Native libc supports static linking |
-| NetBSD | ✅ | Native libc supports static linking |
-| OpenBSD | ✅ | Native libc supports static linking |
-| macOS | ⚠️ | Apple discourages and limits static linking |
-| iOS | ⚠️ | Limited; requires Apple code signing for deployment |
-| Android | ❌ | Android requires dynamic linking to system libraries |
+| `aix/ppc64` | Zig does not provide AIX libc |
+| `linux/mips*` | Go requires hard-float ABI; Zig MIPS backend incompatible |
+| `linux/ppc64` | Go does not support external linking for big-endian ppc64 |
+| `openbsd/*` | Zig linker does not support `-nopie` flag required by Go |
+| `dragonfly/*` | Zig does not ship DragonFly BSD libc headers |
+| `solaris/*`, `illumos/*` | Zig does not recognize Solaris as a valid target OS |
+| `ios/*` | Zig does not ship iOS SDK headers |
+| `freebsd/arm*` | Go linker requires `ld.bfd` for FreeBSD ARM |
+| `android/arm` | Zig does not support `-mfloat-abi=hard` required by Go |
 
 ## How It Works
 
