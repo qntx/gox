@@ -90,7 +90,7 @@ Manage Zig compiler installations cached in `~/.cache/gox/zig/`.
 | OS | Go | Zig | gox |
 | :--- | :--- | :--- | :--- |
 | **Linux** | amd64, arm64, 386, arm, riscv64, loong64, mips64, mips64le, ppc64, ppc64le, s390x, mips, mipsle | amd64, arm64, 386, arm, riscv64, loong64, mips64, mips64le, ppc64, ppc64le, s390x, mips, mipsle | amd64, arm64, 386, arm, riscv64, loong64, ppc64le, s390x |
-| **macOS** | amd64, arm64 | amd64, arm64 | amd64, arm64 |
+| **macOS** | amd64, arm64 | amd64, arm64 | amd64 |
 | **Windows** | amd64, 386, arm64 | amd64, 386, arm64 | amd64, 386, arm64 |
 | **FreeBSD** | amd64, 386, arm, arm64, riscv64 | amd64, arm64, 386, arm | amd64, 386 |
 | **NetBSD** | amd64, 386, arm, arm64 | amd64, arm64, 386, arm | amd64, arm64, 386, arm |
@@ -116,6 +116,7 @@ Manage Zig compiler installations cached in `~/.cache/gox/zig/`.
 | `ios/*` | Zig does not ship iOS SDK headers |
 | `freebsd/arm*` | Go linker requires `ld.bfd` for FreeBSD ARM |
 | `android/arm` | Zig does not support `-mfloat-abi=hard` required by Go |
+| `darwin/arm64` | Go runtime requires CoreFoundation framework unavailable in Zig |
 
 ## How It Works
 

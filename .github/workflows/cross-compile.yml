@@ -22,9 +22,8 @@ jobs:
           - { os: linux, arch: loong64 }
           - { os: linux, arch: ppc64le }
           - { os: linux, arch: s390x }
-          # macOS (cross-compile from Linux with DWARF disabled)
+          # macOS (only arm64 requires CoreFoundation framework)
           - { os: darwin, arch: amd64 }
-          - { os: darwin, arch: arm64 }
           # Windows
           - { os: windows, arch: amd64 }
           - { os: windows, arch: 386 }
