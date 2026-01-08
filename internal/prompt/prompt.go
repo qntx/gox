@@ -69,13 +69,13 @@ func Run(opts *build.Options) (*build.Options, error) {
 			huh.NewInput().
 				Title("Include Directories").
 				Description("C header paths (comma-separated)").
-				Placeholder("-I/path/to/headers").
+				Placeholder("/usr/include/openssl, /opt/local/include").
 				Value(&includeDirs),
 
 			huh.NewInput().
 				Title("Library Directories").
 				Description("Library search paths (comma-separated)").
-				Placeholder("-L/path/to/libs").
+				Placeholder("/usr/lib/x86_64-linux-gnu, /opt/local/lib").
 				Value(&libDirs),
 
 			huh.NewInput().
