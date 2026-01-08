@@ -9,13 +9,12 @@ Common CGO cross-compilation scenarios.
 | `minimal` | Inline C code | None |
 | `sqlite` | go-sqlite3 database | None (vendored) |
 | `zlib` | Compression | zlib |
-| `libcurl` | HTTP client | libcurl |
 
 ## Quick Start
 
 ```bash
 # Install gox
-go install gox.qntx.fun/cmd/gox@latest
+go install gox.qntx.fun@latest
 
 # Build minimal example for Linux
 cd minimal
