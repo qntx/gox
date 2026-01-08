@@ -24,6 +24,10 @@ gox build --os linux --arch arm64                    # Cross-compile to Linux AR
 gox build --os linux --arch amd64 --linkmode static  # Static binary
 ```
 
+## Demo
+
+![gox demo](gox.gif)
+
 ## Usage
 
 ### Basic Syntax
