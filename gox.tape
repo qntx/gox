@@ -25,7 +25,7 @@ Sleep 1s
 # Step 1: Launch Interactive Build
 # ============================================================
 
-Type "gox build -v"
+Type "gox build . -v"
 Sleep 500ms
 Enter
 Sleep 2s
@@ -35,42 +35,44 @@ Sleep 2s
 # ============================================================
 
 Down
-Sleep 1600ms
-Tab
-Sleep 1600ms
-Tab
-Sleep 1600ms
+Sleep 2s
+Enter
+Sleep 2s
+Enter
+Sleep 2s
 
 # ============================================================
 # Step 3: Skip Library Configuration
 # ============================================================
 
-Tab
-Sleep 1600ms
-Tab
-Sleep 1600ms
-Tab
-Sleep 1600ms
+Enter
+Sleep 2s
+Enter
+Sleep 2s
+Enter
+Sleep 2s
 
 # ============================================================
 # Step 4: Set Output Path
 # ============================================================
 
-Tab
 Enter
-Sleep 1s
+Sleep 2s
 
 # ============================================================
 # Step 5: Build Process
 # ============================================================
 
-Sleep 1s
+Sleep 2s
 
 # ============================================================
 # Step 6: Verify Build Artifacts
 # ============================================================
 
-Type "ls -lh && file minimal"
-Sleep 500ms
+Type "ls -lh"
+Sleep 2s
 Enter
-Sleep 6s
+Type "file minimal"
+Sleep 2s
+Enter
+Sleep 9s
