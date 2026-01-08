@@ -2,6 +2,7 @@ package prompt
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/huh"
 	"gox.qntx.fun/internal/build"
@@ -115,38 +116,10 @@ func Run(opts *build.Options) (*build.Options, error) {
 
 func splitTrim(s string) []string {
 	var result []string
-	for _, part := range split(s, ",") {
-		if p := trim(part); p != "" {
+	for part := range strings.SplitSeq(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
 			result = append(result, p)
 		}
 	}
 	return result
-}
-
-func split(s, sep string) []string {
-	if s == "" {
-		return nil
-	}
-	var result []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if i+len(sep) <= len(s) && s[i:i+len(sep)] == sep {
-			result = append(result, s[start:i])
-			start = i + len(sep)
-			i += len(sep) - 1
-		}
-	}
-	result = append(result, s[start:])
-	return result
-}
-
-func trim(s string) string {
-	start, end := 0, len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\t') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t') {
-		end--
-	}
-	return s[start:end]
 }

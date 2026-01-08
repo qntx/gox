@@ -47,7 +47,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	zigPath, err := zig.Ensure(cmd.Context(), buildOpts.ZigVersion, buildOpts.Verbose)
+	zigPath, err := zig.Ensure(cmd.Context(), buildOpts.ZigVersion)
 	if err != nil {
 		return fmt.Errorf("zig: %w", err)
 	}

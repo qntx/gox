@@ -18,6 +18,20 @@ const (
 	zigSubdir = "zig"
 )
 
+var (
+	goarchToZigHost = map[string]string{
+		"amd64": "x86_64",
+		"386":   "x86",
+		"arm64": "aarch64",
+		"arm":   "armv7a",
+	}
+	goosToZigHost = map[string]string{
+		"linux":   "linux",
+		"darwin":  "macos",
+		"windows": "windows",
+	}
+)
+
 type Index map[string]Version
 
 type Version struct {
@@ -39,10 +53,14 @@ func (v *Version) UnmarshalJSON(data []byte) error {
 	}
 
 	if ver, ok := raw["version"]; ok {
-		json.Unmarshal(ver, &v.Version)
+		if err := json.Unmarshal(ver, &v.Version); err != nil {
+			return err
+		}
 	}
 	if date, ok := raw["date"]; ok {
-		json.Unmarshal(date, &v.Date)
+		if err := json.Unmarshal(date, &v.Date); err != nil {
+			return err
+		}
 	}
 
 	v.Tarball = make(map[string]Target)
@@ -58,7 +76,7 @@ func (v *Version) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func Ensure(ctx context.Context, version string, verbose bool) (string, error) {
+func Ensure(ctx context.Context, version string) (string, error) {
 	cache, err := cacheRoot()
 	if err != nil {
 		return "", err
@@ -78,9 +96,7 @@ func Ensure(ctx context.Context, version string, verbose bool) (string, error) {
 		return zigDir, nil
 	}
 
-	if verbose {
-		fmt.Fprintf(os.Stderr, "fetching zig version index...\n")
-	}
+	fmt.Fprintf(os.Stderr, "fetching zig version index...\n")
 
 	index, err := fetchIndex(ctx)
 	if err != nil {
@@ -92,17 +108,15 @@ func Ensure(ctx context.Context, version string, verbose bool) (string, error) {
 		return "", fmt.Errorf("zig version %q not found", version)
 	}
 
-	hostTarget := hostTarget()
-	target, ok := ver.Tarball[hostTarget]
+	host := hostTarget()
+	target, ok := ver.Tarball[host]
 	if !ok {
-		return "", fmt.Errorf("no zig build for %s", hostTarget)
+		return "", fmt.Errorf("no zig build for %s", host)
 	}
 
-	if verbose {
-		fmt.Fprintf(os.Stderr, "downloading zig %s for %s...\n", version, hostTarget)
-	}
+	fmt.Fprintf(os.Stderr, "downloading zig %s for %s...\n", version, host)
 
-	if err := download(ctx, target.Tarball, zigDir, verbose); err != nil {
+	if err := download(ctx, target.Tarball, zigDir); err != nil {
 		return "", err
 	}
 
@@ -141,29 +155,18 @@ func fetchIndex(ctx context.Context) (Index, error) {
 }
 
 func hostTarget() string {
-	arch := map[string]string{
-		"amd64": "x86_64",
-		"386":   "x86",
-		"arm64": "aarch64",
-		"arm":   "armv7a",
-	}[runtime.GOARCH]
+	arch := goarchToZigHost[runtime.GOARCH]
 	if arch == "" {
 		arch = runtime.GOARCH
 	}
-
-	os := map[string]string{
-		"linux":   "linux",
-		"darwin":  "macos",
-		"windows": "windows",
-	}[runtime.GOOS]
-	if os == "" {
-		os = runtime.GOOS
+	hostOS := goosToZigHost[runtime.GOOS]
+	if hostOS == "" {
+		hostOS = runtime.GOOS
 	}
-
-	return arch + "-" + os
+	return arch + "-" + hostOS
 }
 
-func download(ctx context.Context, url, destDir string, verbose bool) error {
+func download(ctx context.Context, url, destDir string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -193,10 +196,7 @@ func download(ctx context.Context, url, destDir string, verbose bool) error {
 		return err
 	}
 
-	var reader io.Reader = resp.Body
-	if verbose {
-		reader = &progressReader{r: resp.Body, total: resp.ContentLength}
-	}
+	reader := &progressReader{r: resp.Body, total: resp.ContentLength}
 
 	if _, err := io.Copy(f, reader); err != nil {
 		f.Close()
@@ -204,9 +204,7 @@ func download(ctx context.Context, url, destDir string, verbose bool) error {
 	}
 	f.Close()
 
-	if verbose {
-		fmt.Fprintf(os.Stderr, "\nextracting...\n")
-	}
+	fmt.Fprintf(os.Stderr, "\nextracting...\n")
 
 	if err := os.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
 		return err

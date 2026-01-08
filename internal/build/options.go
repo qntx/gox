@@ -5,6 +5,22 @@ import (
 	"runtime"
 )
 
+var (
+	goarchToZig = map[string]string{
+		"amd64":   "x86_64",
+		"386":     "x86",
+		"arm64":   "aarch64",
+		"arm":     "arm",
+		"riscv64": "riscv64",
+	}
+	goosToZig = map[string]string{
+		"linux":   "linux-gnu",
+		"darwin":  "macos",
+		"windows": "windows-gnu",
+		"freebsd": "freebsd",
+	}
+)
+
 type Options struct {
 	Output      string
 	GOOS        string
@@ -40,26 +56,13 @@ func (o *Options) ZigTarget() string {
 }
 
 func zigTarget(goos, goarch string) string {
-	arch := map[string]string{
-		"amd64":   "x86_64",
-		"386":     "x86",
-		"arm64":   "aarch64",
-		"arm":     "arm",
-		"riscv64": "riscv64",
-	}[goarch]
+	arch := goarchToZig[goarch]
 	if arch == "" {
 		arch = goarch
 	}
-
-	os := map[string]string{
-		"linux":   "linux-gnu",
-		"darwin":  "macos",
-		"windows": "windows-gnu",
-		"freebsd": "freebsd",
-	}[goos]
+	os := goosToZig[goos]
 	if os == "" {
 		os = goos
 	}
-
 	return arch + "-" + os
 }

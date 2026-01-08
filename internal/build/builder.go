@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -99,17 +100,17 @@ func (b *Builder) buildArgs(packages []string) []string {
 }
 
 func (b *Builder) zigCC(target string) string {
-	zigBin := filepath.Join(b.zigPath, "zig")
-	if b.opts.GOOS == "windows" || (b.opts.GOOS == "" && os.PathSeparator == '\\') {
-		zigBin += ".exe"
-	}
-	return fmt.Sprintf("%s cc -target %s", zigBin, target)
+	return b.zigCmd("cc", target)
 }
 
 func (b *Builder) zigCXX(target string) string {
+	return b.zigCmd("c++", target)
+}
+
+func (b *Builder) zigCmd(compiler, target string) string {
 	zigBin := filepath.Join(b.zigPath, "zig")
-	if b.opts.GOOS == "windows" || (b.opts.GOOS == "" && os.PathSeparator == '\\') {
+	if runtime.GOOS == "windows" {
 		zigBin += ".exe"
 	}
-	return fmt.Sprintf("%s c++ -target %s", zigBin, target)
+	return fmt.Sprintf("%s %s -target %s", zigBin, compiler, target)
 }

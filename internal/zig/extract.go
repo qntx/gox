@@ -3,6 +3,7 @@ package zig
 import (
 	"archive/tar"
 	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"fmt"
 	"io"
@@ -49,7 +50,9 @@ func extractZip(archivePath, destDir string) error {
 		}
 
 		if f.FileInfo().IsDir() {
-			os.MkdirAll(path, 0755)
+			if err := os.MkdirAll(path, 0755); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -79,62 +82,51 @@ func extractZip(archivePath, destDir string) error {
 }
 
 func extractTarXz(archivePath, destDir string) error {
-	f, err := os.Open(archivePath)
+	data, err := os.ReadFile(archivePath)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
-	var reader io.Reader
-
-	if strings.HasSuffix(archivePath, ".tar.gz") || strings.HasSuffix(archivePath, ".tgz") {
-		gr, err := gzip.NewReader(f)
-		if err != nil {
-			return err
+	newReader := func() (io.Reader, error) {
+		buf := bytes.NewReader(data)
+		if strings.HasSuffix(archivePath, ".tar.gz") || strings.HasSuffix(archivePath, ".tgz") {
+			return gzip.NewReader(buf)
 		}
-		defer gr.Close()
-		reader = gr
-	} else {
-		xr, err := xz.NewReader(f)
-		if err != nil {
-			return err
-		}
-		reader = xr
+		return xz.NewReader(buf)
 	}
 
-	tr := tar.NewReader(reader)
+	reader, err := newReader()
+	if err != nil {
+		return err
+	}
 
-	var stripPrefix string
+	stripPrefix := findStripPrefix(tar.NewReader(reader))
+
+	reader, err = newReader()
+	if err != nil {
+		return err
+	}
+
+	return extractTar(tar.NewReader(reader), destDir, stripPrefix)
+}
+
+func findStripPrefix(tr *tar.Reader) string {
+	for {
+		hdr, err := tr.Next()
+		if err != nil {
+			return ""
+		}
+		if parts := strings.SplitN(hdr.Name, "/", 2); len(parts) > 0 {
+			return parts[0]
+		}
+	}
+}
+
+func extractTar(tr *tar.Reader, destDir, stripPrefix string) error {
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		parts := strings.SplitN(hdr.Name, "/", 2)
-		if len(parts) > 0 {
-			stripPrefix = parts[0]
-			break
-		}
-	}
-
-	f.Seek(0, io.SeekStart)
-	if strings.HasSuffix(archivePath, ".tar.gz") || strings.HasSuffix(archivePath, ".tgz") {
-		gr, _ := gzip.NewReader(f)
-		defer gr.Close()
-		reader = gr
-	} else {
-		xr, _ := xz.NewReader(f)
-		reader = xr
-	}
-	tr = tar.NewReader(reader)
-
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
+			return nil
 		}
 		if err != nil {
 			return err
@@ -146,7 +138,6 @@ func extractTarXz(archivePath, destDir string) error {
 		}
 
 		path := filepath.Join(destDir, name)
-
 		if !strings.HasPrefix(path, filepath.Clean(destDir)+string(os.PathSeparator)) {
 			return fmt.Errorf("invalid path: %s", path)
 		}
@@ -157,24 +148,27 @@ func extractTarXz(archivePath, destDir string) error {
 				return err
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			if err := extractFile(path, tr, hdr.Mode); err != nil {
 				return err
 			}
-			out, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode))
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(out, tr); err != nil {
-				out.Close()
-				return err
-			}
-			out.Close()
 		case tar.TypeSymlink:
-			os.Remove(path)
+			_ = os.Remove(path)
 			if err := os.Symlink(hdr.Linkname, path); err != nil {
 				return err
 			}
 		}
 	}
-	return nil
+}
+
+func extractFile(path string, r io.Reader, mode int64) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(mode))
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, r)
+	out.Close()
+	return err
 }
