@@ -7,32 +7,22 @@ import (
 
 var (
 	goarchToZig = map[string]string{
-		"amd64":    "x86_64",
-		"386":      "x86",
-		"arm64":    "aarch64",
-		"arm":      "arm",
-		"riscv64":  "riscv64",
-		"loong64":  "loongarch64",
-		"ppc64":    "powerpc64",
-		"ppc64le":  "powerpc64le",
-		"s390x":    "s390x",
-		"mips64":   "mips64",
-		"mips64le": "mips64el",
-		"mips":     "mips",
-		"mipsle":   "mipsel",
+		"amd64":   "x86_64",
+		"386":     "x86",
+		"arm64":   "aarch64",
+		"arm":     "arm",
+		"riscv64": "riscv64",
+		"loong64": "loongarch64",
+		"ppc64le": "powerpc64le",
+		"s390x":   "s390x",
 	}
 	goosToZig = map[string]string{
-		"linux":     "linux-gnu",
-		"darwin":    "macos",
-		"windows":   "windows-gnu",
-		"freebsd":   "freebsd",
-		"netbsd":    "netbsd",
-		"openbsd":   "openbsd",
-		"dragonfly": "dragonfly",
-		"solaris":   "solaris",
-		"illumos":   "solaris",
-		"ios":       "ios",
-		"android":   "linux-android",
+		"linux":   "linux-gnu",
+		"darwin":  "macos",
+		"windows": "windows-gnu",
+		"freebsd": "freebsd",
+		"netbsd":  "netbsd",
+		"android": "linux-android29",
 	}
 )
 
@@ -77,12 +67,17 @@ func (o *Options) ZigTarget() string {
 	if osTarget == "" {
 		osTarget = o.GOOS
 	}
-	if o.LinkMode == "static" && o.GOOS == "linux" {
-		if o.GOARCH == "arm" {
+
+	// Handle Linux ARM variants
+	if o.GOOS == "linux" && o.GOARCH == "arm" {
+		if o.LinkMode == "static" {
 			osTarget = "linux-musleabihf"
 		} else {
-			osTarget = "linux-musl"
+			osTarget = "linux-gnueabihf"
 		}
+	} else if o.LinkMode == "static" && o.GOOS == "linux" {
+		osTarget = "linux-musl"
 	}
+
 	return arch + "-" + osTarget
 }

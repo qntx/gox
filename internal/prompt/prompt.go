@@ -20,13 +20,8 @@ var targets = []struct {
 	{"linux/arm", "linux", "arm"},
 	{"linux/riscv64", "linux", "riscv64"},
 	{"linux/loong64", "linux", "loong64"},
-	{"linux/ppc64", "linux", "ppc64"},
 	{"linux/ppc64le", "linux", "ppc64le"},
 	{"linux/s390x", "linux", "s390x"},
-	{"linux/mips64", "linux", "mips64"},
-	{"linux/mips64le", "linux", "mips64le"},
-	{"linux/mipsle", "linux", "mipsle"},
-	{"linux/mips", "linux", "mips"},
 	// macOS
 	{"darwin/amd64", "darwin", "amd64"},
 	{"darwin/arm64", "darwin", "arm64"},
@@ -36,32 +31,16 @@ var targets = []struct {
 	{"windows/arm64", "windows", "arm64"},
 	// FreeBSD
 	{"freebsd/amd64", "freebsd", "amd64"},
-	{"freebsd/arm64", "freebsd", "arm64"},
 	{"freebsd/386", "freebsd", "386"},
-	{"freebsd/arm", "freebsd", "arm"},
 	// NetBSD
 	{"netbsd/amd64", "netbsd", "amd64"},
 	{"netbsd/arm64", "netbsd", "arm64"},
 	{"netbsd/386", "netbsd", "386"},
 	{"netbsd/arm", "netbsd", "arm"},
-	// OpenBSD
-	{"openbsd/amd64", "openbsd", "amd64"},
-	{"openbsd/arm64", "openbsd", "arm64"},
-	{"openbsd/386", "openbsd", "386"},
-	{"openbsd/arm", "openbsd", "arm"},
-	// DragonFly BSD
-	{"dragonfly/amd64", "dragonfly", "amd64"},
-	// Solaris/illumos
-	{"solaris/amd64", "solaris", "amd64"},
-	{"illumos/amd64", "illumos", "amd64"},
-	// iOS
-	{"ios/arm64", "ios", "arm64"},
-	{"ios/amd64", "ios", "amd64"},
 	// Android
 	{"android/arm64", "android", "arm64"},
 	{"android/amd64", "android", "amd64"},
 	{"android/386", "android", "386"},
-	{"android/arm", "android", "arm"},
 }
 
 var linkModes = []struct {

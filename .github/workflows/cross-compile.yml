@@ -20,14 +20,9 @@ jobs:
           - { os: linux, arch: arm }
           - { os: linux, arch: riscv64 }
           - { os: linux, arch: loong64 }
-          - { os: linux, arch: ppc64 }
           - { os: linux, arch: ppc64le }
           - { os: linux, arch: s390x }
-          - { os: linux, arch: mips64 }
-          - { os: linux, arch: mips64le }
-          - { os: linux, arch: mipsle }
-          - { os: linux, arch: mips }
-          # macOS
+          # macOS (cross-compile from Linux with DWARF disabled)
           - { os: darwin, arch: amd64 }
           - { os: darwin, arch: arm64 }
           # Windows
@@ -36,32 +31,16 @@ jobs:
           - { os: windows, arch: arm64 }
           # FreeBSD
           - { os: freebsd, arch: amd64 }
-          - { os: freebsd, arch: arm64 }
           - { os: freebsd, arch: 386 }
-          - { os: freebsd, arch: arm }
           # NetBSD
           - { os: netbsd, arch: amd64 }
           - { os: netbsd, arch: arm64 }
           - { os: netbsd, arch: 386 }
           - { os: netbsd, arch: arm }
-          # OpenBSD
-          - { os: openbsd, arch: amd64 }
-          - { os: openbsd, arch: arm64 }
-          - { os: openbsd, arch: 386 }
-          - { os: openbsd, arch: arm }
-          # DragonFly BSD
-          - { os: dragonfly, arch: amd64 }
-          # Solaris/illumos
-          - { os: solaris, arch: amd64 }
-          - { os: illumos, arch: amd64 }
-          # iOS
-          - { os: ios, arch: arm64 }
-          - { os: ios, arch: amd64 }
           # Android
           - { os: android, arch: arm64 }
           - { os: android, arch: amd64 }
           - { os: android, arch: 386 }
-          - { os: android, arch: arm }
 
     steps:
       - uses: actions/checkout@v6
@@ -69,7 +48,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "stable"
 
       - name: Build gox
         run: go build -o gox ./cmd/gox/

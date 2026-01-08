@@ -86,11 +86,23 @@ func (b *Builder) buildArgs(packages []string) []string {
 		args = append(args, "-o", b.opts.Output)
 	}
 
+	// Build ldflags
+	var ldflags []string
+
+	// macOS cross-compile: disable DWARF to avoid dsymutil requirement
+	if b.opts.GOOS == "darwin" && runtime.GOOS != "darwin" {
+		ldflags = append(ldflags, "-w")
+	}
+
 	switch b.opts.LinkMode {
 	case "static":
-		args = append(args, `-ldflags=-linkmode=external -extldflags "-static"`)
+		ldflags = append(ldflags, "-linkmode=external", `-extldflags "-static"`)
 	case "dynamic":
-		args = append(args, `-ldflags=-linkmode=external`)
+		ldflags = append(ldflags, "-linkmode=external")
+	}
+
+	if len(ldflags) > 0 {
+		args = append(args, "-ldflags="+strings.Join(ldflags, " "))
 	}
 
 	args = append(args, b.opts.BuildFlags...)
