@@ -18,12 +18,20 @@ var targets = []struct {
 	{"linux/386", "linux", "386"},
 	{"linux/arm", "linux", "arm"},
 	{"linux/riscv64", "linux", "riscv64"},
+	{"linux/loong64", "linux", "loong64"},
+	{"linux/ppc64le", "linux", "ppc64le"},
+	{"linux/s390x", "linux", "s390x"},
 	{"darwin/amd64", "darwin", "amd64"},
 	{"darwin/arm64", "darwin", "arm64"},
 	{"windows/amd64", "windows", "amd64"},
 	{"windows/386", "windows", "386"},
 	{"windows/arm64", "windows", "arm64"},
 	{"freebsd/amd64", "freebsd", "amd64"},
+	{"freebsd/arm64", "freebsd", "arm64"},
+	{"netbsd/amd64", "netbsd", "amd64"},
+	{"openbsd/amd64", "openbsd", "amd64"},
+	{"android/arm64", "android", "arm64"},
+	{"android/amd64", "android", "amd64"},
 }
 
 var linkModes = []struct {

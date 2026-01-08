@@ -4,14 +4,6 @@
 
 `gox` eliminates the complexity of cross-compiling Go projects with CGO by leveraging [Zig](https://ziglang.org/)'s universal C/C++ compiler. No platform-specific toolchains, no Docker containers—just one command.
 
-## Features
-
-- **Zero Setup**: Automatically downloads and caches Zig compiler on first use
-- **Universal Toolchain**: Cross-compile to any target from any host platform
-- **Static Linking**: Produce fully static binaries with `--linkmode static`
-- **Interactive Mode**: TUI for selecting targets and configuring build options
-- **Drop-in Replacement**: Works with existing CGO projects without modification
-
 ## Installation
 
 ```bash
@@ -21,151 +13,107 @@ go install github.com/qntx/gox/cmd/gox@latest
 ## Quick Start
 
 ```bash
-# Interactive mode - guided configuration
-gox build -i
-
-# Cross-compile to Linux ARM64
-gox build --os linux --arch arm64
-
-# Static binary for Linux
-gox build --os linux --arch amd64 --linkmode static -o app
-
-# With external C libraries
-gox build --os linux --arch amd64 \
-  -I/usr/include/openssl \
-  -L/usr/lib/x86_64-linux-gnu \
-  -lssl -lcrypto
+gox build
 ```
+
+
 
 ## Usage
 
-### Basic Cross-Compilation
-
 ```bash
-# Target specification
 gox build --os <OS> --arch <ARCH> [flags] [packages]
-
-# Examples
-gox build --os darwin --arch arm64        # macOS Apple Silicon
-gox build --os windows --arch amd64       # Windows x64
-gox build --os linux --arch arm64         # Linux ARM64
 ```
 
-### Static Linking
+**Examples:**
 
 ```bash
-# Fully static binary (no libc dependency)
-gox build --os linux --arch amd64 --linkmode static
+gox build                                              # Interactive mode
+gox build --os darwin --arch arm64                     # macOS Apple Silicon
+gox build --os windows --arch amd64 -o app.exe         # Windows x64
+gox build --os linux --arch arm64 --linkmode static    # Static Linux ARM64
 
-# Static with external libraries
-gox build --os linux --arch amd64 --linkmode static \
-  -L/path/to/libs -lsqlite3
-```
+# With C libraries
+gox build --os linux --arch amd64 \
+  -I/usr/include/openssl -L/usr/lib -lssl -lcrypto
 
-### C Library Integration
-
-```bash
-# Specify include paths and libraries
-gox build \
-  --include /usr/local/include \
-  --lib /usr/local/lib \
-  --link curl \
-  --link ssl
-```
-
-### Advanced Options
-
-```bash
-# Custom Zig version
-gox build --zig-version 0.11.0 --os linux --arch amd64
-
-# Pass additional go build flags
+# Additional go build flags
 gox build --flags "-tags=prod" --flags "-trimpath"
-
-# Verbose output for debugging
-gox build -v --os linux --arch arm64
 ```
 
-## Command Reference
-
-### Flags
+## Build Flags
 
 | Flag | Alias | Description |
 | ------ | ------ | ------ |
-| `--os` | | Target OS: `linux`, `darwin`, `windows`, `freebsd` |
-| `--arch` | | Target architecture: `amd64`, `arm64`, `386`, `arm`, `riscv64` |
-| `--output` | `-o` | Output binary path |
-| `--linkmode` | | Linking mode: `static`, `dynamic`, `auto` (default) |
-| `--include` | `-I` | C header include directories (repeatable) |
-| `--lib` | `-L` | Library search paths (repeatable) |
-| `--link` | `-l` | Libraries to link (repeatable) |
-| `--zig-version` | | Zig compiler version (default: `master`) |
-| `--flags` | | Additional `go build` flags (repeatable) |
-| `--interactive` | `-i` | Launch interactive TUI mode |
-| `--verbose` | `-v` | Enable verbose output |
+| `--os` | | Target OS |
+| `--arch` | | Target architecture |
+| `--output` | `-o` | Output path |
+| `--linkmode` | | `static`, `dynamic`, `auto` |
+| `--include` | `-I` | C header directories |
+| `--lib` | `-L` | Library search paths |
+| `--link` | `-l` | Libraries to link |
+| `--zig-version` | | Zig version (default: `master`) |
+| `--flags` | | Additional `go build` flags |
+| `--interactive` | `-i` | Interactive TUI mode |
+| `--verbose` | `-v` | Verbose output |
 
-## Supported Targets
+## Zig Management
 
-| OS | Architectures |
+```bash
+gox zig update [version]   # Install/update Zig (default: master)
+gox zig list               # List installed versions
+gox zig clean [version]    # Remove cached installations
+```
+
+## Platform Support
+
+### Architecture Compatibility Matrix
+
+| OS | Go Supported | Zig Supported | gox Supported |
+| ------ | ------ | ------ | ------ |
+| **Linux** | amd64, arm64, 386, arm, riscv64, loong64, mips64, mips64le, ppc64, ppc64le, s390x, mips, mipsle | amd64, arm64, 386, arm, riscv64, loong64, mips64le, ppc64le, s390x | ✅ amd64, arm64, 386, arm, riscv64, loong64, ppc64le, s390x |
+| **macOS** | amd64, arm64 | amd64, arm64 | ✅ amd64, arm64 |
+| **Windows** | amd64, 386, arm64 | amd64, 386, arm64 | ✅ amd64, 386, arm64 |
+| **FreeBSD** | amd64, 386, arm, arm64, riscv64 | amd64, arm64, 386 | ✅ amd64, arm64 |
+| **NetBSD** | amd64, 386, arm, arm64 | amd64 | ✅ amd64 |
+| **OpenBSD** | amd64, 386, arm, arm64, ppc64, riscv64 | amd64, arm64 | ✅ amd64 |
+| **Android** | amd64, 386, arm, arm64 | amd64, arm64, 386, arm | ✅ arm64, amd64 |
+
+### Unsupported Targets
+
+| Target | Reason |
 | ------ | ------ |
-| Linux | amd64, arm64, 386, arm, riscv64 |
-| macOS | amd64, arm64 |
-| Windows | amd64, 386, arm64 |
-| FreeBSD | amd64 |
+| js/wasm, wasip1/wasm | No CGO support in WebAssembly |
+| plan9/* | No CGO support in Plan 9 |
+| ios/* | Requires Xcode and code signing |
+| aix/ppc64 | Zig does not support AIX |
+| illumos, solaris, dragonfly | Limited Zig libc support |
+
+### Static Linking
+
+| OS | Support | Notes |
+| ------ | ------ | ------ |
+| Linux | ✅ Full | Auto-switches to musl libc |
+| Windows | ✅ Full | mingw-w64 static support |
+| FreeBSD | ✅ Full | Native static linking |
+| macOS | ⚠️ Limited | Apple discourages static linking |
+| Android | ❌ None | Requires dynamic linking |
 
 ## How It Works
 
-1. **Zig Download**: On first run, downloads the Zig compiler matching your host platform to `~/.cache/gox/zig/<version>`
-2. **Compiler Setup**: Configures `CC=zig cc` and `CXX=zig c++` with the target triple (e.g., `x86_64-linux-gnu`)
-3. **CGO Build**: Executes `go build` with `CGO_ENABLED=1` and the configured environment
-
-Zig's C/C++ compiler is a drop-in replacement for gcc/clang that can cross-compile to any target without installing target-specific toolchains.
+1. **Downloads Zig** on first run → `~/.cache/gox/zig/<version>`
+2. **Sets CC/CXX** → `zig cc -target <triple>` (e.g., `x86_64-linux-gnu`)
+3. **Runs go build** with `CGO_ENABLED=1`
 
 ## Examples
 
-See [examples/](./example) for complete working examples:
+See [examples/](./example):
 
-- **minimal**: Inline C code with no external dependencies
-- **sqlite**: Cross-compile go-sqlite3 with vendored C library
-- **zlib**: Link against system zlib library
-
-## Troubleshooting
-
-### Binary not found after installation
-
-Ensure `$GOPATH/bin` (or `$GOBIN`) is in your `PATH`:
-
-```bash
-# Check GOPATH
-go env GOPATH
-
-# Add to PATH (Linux/macOS)
-export PATH="$(go env GOPATH)/bin:$PATH"
-
-# Add to PATH (Windows PowerShell)
-$env:PATH += ";$(go env GOPATH)\bin"
-```
-
-### Zig download fails
-
-Specify a stable Zig version instead of `master`:
-
-```bash
-gox build --zig-version 0.11.0 --os linux --arch amd64
-```
-
-### Linking errors with external libraries
-
-Ensure library paths are correct and libraries exist for the target architecture:
-
-```bash
-# Verify library exists
-ls /usr/lib/x86_64-linux-gnu/libssl.a
-
-# Use absolute paths
-gox build -L/usr/lib/x86_64-linux-gnu -lssl
-```
+| Example | Description |
+| ------ | ------ |
+| [minimal](./example/minimal) | Inline C code |
+| [sqlite](./example/sqlite) | go-sqlite3 with vendored C |
+| [zlib](./example/zlib) | System library linking |
 
 ## License
 
-BSD 3-Clause License
+BSD 3-Clause

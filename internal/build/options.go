@@ -7,17 +7,24 @@ import (
 
 var (
 	goarchToZig = map[string]string{
-		"amd64":   "x86_64",
-		"386":     "x86",
-		"arm64":   "aarch64",
-		"arm":     "arm",
-		"riscv64": "riscv64",
+		"amd64":    "x86_64",
+		"386":      "x86",
+		"arm64":    "aarch64",
+		"arm":      "arm",
+		"riscv64":  "riscv64",
+		"loong64":  "loongarch64",
+		"ppc64le":  "powerpc64le",
+		"s390x":    "s390x",
+		"mips64le": "mips64el",
 	}
 	goosToZig = map[string]string{
 		"linux":   "linux-gnu",
 		"darwin":  "macos",
 		"windows": "windows-gnu",
 		"freebsd": "freebsd",
+		"netbsd":  "netbsd",
+		"openbsd": "openbsd",
+		"android": "linux-android",
 	}
 )
 
