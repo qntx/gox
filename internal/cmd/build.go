@@ -32,6 +32,7 @@ func init() {
 	f.StringSliceVarP(&buildOpts.Libs, "link", "l", nil, "libraries to link")
 	f.StringVar(&buildOpts.LinkMode, "linkmode", "", "link mode: static, dynamic, or auto")
 	f.StringSliceVar(&buildOpts.BuildFlags, "flags", nil, "additional go build flags")
+	f.BoolVar(&buildOpts.Pack, "pack", false, "create archive after build")
 	f.BoolVarP(&buildOpts.Interactive, "interactive", "i", false, "interactive mode")
 	f.BoolVarP(&buildOpts.Verbose, "verbose", "v", false, "verbose output")
 }

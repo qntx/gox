@@ -58,6 +58,13 @@ gox build --flags "-tags=prod" --flags "-trimpath" --flags "-ldflags=-s -w"
 
 # Standard layout: output to ./myapp/bin/myapp with rpath for ./myapp/lib/
 gox build --os linux --arch amd64 --prefix ./myapp
+
+# Build and create archive for distribution
+gox build --os linux --arch amd64 -o ./app --pack
+# → ./app, ./app-linux-amd64.tar.gz
+
+gox build --os windows --arch amd64 --prefix ./myapp --pack
+# → ./myapp/bin/myapp.exe, ./myapp-windows-amd64.zip
 ```
 
 ## Command Reference
@@ -71,6 +78,7 @@ gox build --os linux --arch amd64 --prefix ./myapp
 | `--output` | `-o` | Output binary path |
 | `--prefix` | | Output prefix directory (creates `bin/lib` structure with rpath) |
 | `--no-rpath` | | Disable rpath when using `--prefix` |
+| `--pack` | | Create archive after build (`.tar.gz` for Linux/macOS, `.zip` for Windows) |
 | `--linkmode` | | Link mode: `auto` (default), `static`, `dynamic` |
 | `--include` | `-I` | C header include directories (repeatable) |
 | `--lib` | `-L` | Library search directories (repeatable) |

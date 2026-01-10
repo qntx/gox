@@ -37,6 +37,7 @@ type Options struct {
 	Output      string // Explicit output path (highest priority)
 	Prefix      string // Installation prefix: creates <prefix>/bin/ and <prefix>/lib/
 	NoRpath     bool   // Disable rpath when using prefix
+	Pack        bool   // Create archive after build
 	GOOS        string
 	GOARCH      string
 	ZigVersion  string
@@ -78,6 +79,10 @@ func (o *Options) Validate() error {
 
 	if o.NoRpath && o.Prefix == "" {
 		return errors.New("--no-rpath requires --prefix")
+	}
+
+	if o.Pack && o.Output == "" && o.Prefix == "" {
+		return errors.New("--pack requires --output or --prefix")
 	}
 
 	return nil

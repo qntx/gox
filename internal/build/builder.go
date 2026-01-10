@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/qntx/gox/internal/pack"
 )
 
 const (
@@ -41,7 +43,40 @@ func (b *Builder) Run(ctx context.Context, packages []string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	if b.opts.Pack {
+		return b.createArchive()
+	}
+
+	return nil
+}
+
+func (b *Builder) createArchive() error {
+	src := b.packSource()
+	if src == "" {
+		return fmt.Errorf("--pack requires --output or --prefix")
+	}
+
+	archive, err := pack.Archive(src, b.opts.GOOS, b.opts.GOARCH)
+	if err != nil {
+		return fmt.Errorf("create archive: %w", err)
+	}
+
+	if b.opts.Verbose {
+		fmt.Fprintf(os.Stderr, "archive: %s\n", archive)
+	}
+
+	return nil
+}
+
+func (b *Builder) packSource() string {
+	if b.opts.Prefix != "" {
+		return b.opts.Prefix
+	}
+	return b.opts.Output
 }
 
 func (b *Builder) printVerbose(env, args []string) {
