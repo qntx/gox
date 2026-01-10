@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	"github.com/qntx/gox/internal/pack"
 )
 
 const (
@@ -59,13 +57,13 @@ func (b *Builder) createArchive() error {
 		return fmt.Errorf("--pack requires --output or --prefix")
 	}
 
-	archive, err := pack.Archive(src, b.opts.GOOS, b.opts.GOARCH)
+	archivePath, err := archive(src, b.opts.GOOS, b.opts.GOARCH)
 	if err != nil {
 		return fmt.Errorf("create archive: %w", err)
 	}
 
 	if b.opts.Verbose {
-		fmt.Fprintf(os.Stderr, "archive: %s\n", archive)
+		fmt.Fprintf(os.Stderr, "archive: %s\n", archivePath)
 	}
 	return nil
 }

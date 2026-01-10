@@ -1,11 +1,11 @@
-package cmd
+package cli
 
 import (
 	"fmt"
 	"os"
 
 	"github.com/qntx/gox/internal/build"
-	"github.com/qntx/gox/internal/prompt"
+	"github.com/qntx/gox/internal/tui"
 	"github.com/qntx/gox/internal/zig"
 	"github.com/spf13/cobra"
 )
@@ -43,7 +43,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	opts.LinkMode = build.LinkMode(linkModeStr)
 
 	if opts.Interactive || (opts.GOOS == "" && opts.GOARCH == "") {
-		p, err := prompt.Run(&opts)
+		p, err := tui.SelectTarget(&opts)
 		if err != nil {
 			return fmt.Errorf("prompt: %w", err)
 		}

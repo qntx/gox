@@ -1,4 +1,4 @@
-package prompt
+package tui
 
 import (
 	"fmt"
@@ -43,7 +43,7 @@ var linkModes = []struct {
 	{"Dynamic linking", build.LinkModeDynamic},
 }
 
-func Run(opts *build.Options) (*build.Options, error) {
+func SelectTarget(opts *build.Options) (*build.Options, error) {
 	var (
 		targetIdx            int
 		linkIdx              int

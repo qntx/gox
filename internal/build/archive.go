@@ -1,4 +1,4 @@
-package pack
+package build
 
 import (
 	"archive/tar"
@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 )
 
-func Archive(src, goos, goarch string) (string, error) {
+func archive(src, goos, goarch string) (string, error) {
 	info, err := os.Stat(src)
 	if err != nil {
 		return "", fmt.Errorf("stat source: %w", err)
