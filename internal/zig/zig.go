@@ -13,9 +13,12 @@ import (
 )
 
 const (
-	indexURL  = "https://ziglang.org/download/index.json"
-	cacheDir  = "gox"
-	zigSubdir = "zig"
+	indexURL       = "https://ziglang.org/download/index.json"
+	cacheDir       = "gox"
+	zigSubdir      = "zig"
+	defaultVersion = "master"
+	dirPerm        = 0755
+	exeSuffix      = ".exe"
 )
 
 var (
@@ -78,17 +81,11 @@ func (v *Version) UnmarshalJSON(data []byte) error {
 
 func Ensure(ctx context.Context, version string) (string, error) {
 	if version == "" {
-		version = "master"
-	}
-	cache := cacheRoot()
-
-	zigDir := filepath.Join(cache, zigSubdir, version)
-	zigBin := filepath.Join(zigDir, "zig")
-	if runtime.GOOS == "windows" {
-		zigBin += ".exe"
+		version = defaultVersion
 	}
 
-	if _, err := os.Stat(zigBin); err == nil {
+	zigDir := Path(version)
+	if zigBinExists(zigDir) {
 		return zigDir, nil
 	}
 
@@ -117,6 +114,15 @@ func Ensure(ctx context.Context, version string) (string, error) {
 	}
 
 	return zigDir, nil
+}
+
+func zigBinExists(zigDir string) bool {
+	zigBin := filepath.Join(zigDir, "zig")
+	if runtime.GOOS == "windows" {
+		zigBin += exeSuffix
+	}
+	_, err := os.Stat(zigBin)
+	return err == nil
 }
 
 func cacheRoot() string {
@@ -202,7 +208,7 @@ func download(ctx context.Context, url, destDir string) error {
 
 	fmt.Fprintf(os.Stderr, "\nextracting...\n")
 
-	if err := os.MkdirAll(filepath.Dir(destDir), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(destDir), dirPerm); err != nil {
 		return err
 	}
 

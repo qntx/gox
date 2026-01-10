@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -43,7 +44,7 @@ func extractZip(archivePath, destDir string) error {
 			return err
 		}
 		if f.FileInfo().IsDir() {
-			if err := os.MkdirAll(path, 0755); err != nil {
+			if err := os.MkdirAll(path, dirPerm); err != nil {
 				return err
 			}
 			continue
@@ -56,7 +57,7 @@ func extractZip(archivePath, destDir string) error {
 }
 
 func extractZipFile(f *zip.File, path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), dirPerm); err != nil {
 		return err
 	}
 	rc, err := f.Open()
@@ -132,7 +133,7 @@ func extractTar(tr *tar.Reader, destDir, stripPrefix string) error {
 
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(path, 0755); err != nil {
+			if err := os.MkdirAll(path, dirPerm); err != nil {
 				return err
 			}
 		case tar.TypeReg:
@@ -149,7 +150,7 @@ func extractTar(tr *tar.Reader, destDir, stripPrefix string) error {
 }
 
 func extractFile(path string, r io.Reader, mode int64) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), dirPerm); err != nil {
 		return err
 	}
 	out, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(mode))
@@ -161,10 +162,12 @@ func extractFile(path string, r io.Reader, mode int64) error {
 	return err
 }
 
+var errInvalidPath = errors.New("path traversal detected")
+
 func safePath(destDir, name string) (string, error) {
 	path := filepath.Join(destDir, name)
 	if !strings.HasPrefix(path, filepath.Clean(destDir)+string(os.PathSeparator)) {
-		return "", fmt.Errorf("invalid path: %s", path)
+		return "", fmt.Errorf("%w: %s", errInvalidPath, name)
 	}
 	return path, nil
 }
