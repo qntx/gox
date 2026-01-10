@@ -170,8 +170,8 @@ func detectTarStripPrefix(tr *tar.Reader) (string, error) {
 }
 
 type deferredSymlink struct {
-	target string
-	path   string
+	linkname string // original symlink target from tar header
+	path     string // destination path
 }
 
 func processTar(tr *tar.Reader, destDir, strip string) error {
@@ -207,22 +207,69 @@ func processTar(tr *tar.Reader, destDir, strip string) error {
 			}
 		case tar.TypeSymlink:
 			if err := createSymlink(hdr.Linkname, path); err != nil {
-				// Windows fallback: defer file copy
+				// Windows fallback: defer to copy after all files extracted
 				symlinks = append(symlinks, deferredSymlink{
-					target: filepath.Join(filepath.Dir(path), hdr.Linkname),
-					path:   path,
+					linkname: hdr.Linkname,
+					path:     path,
 				})
 			}
 		}
 	}
 
 	// Resolve deferred symlinks (Windows compatibility)
+	// Build a map for symlink chain resolution
+	return resolveSymlinks(symlinks)
+}
+
+func resolveSymlinks(symlinks []deferredSymlink) error {
+	if len(symlinks) == 0 {
+		return nil
+	}
+
+	// Build map: path -> linkname for chain resolution
+	linkMap := make(map[string]string, len(symlinks))
 	for _, sl := range symlinks {
-		if err := copyFileResolved(sl.target, sl.path); err != nil {
-			return fmt.Errorf("symlink fallback %s: %w", sl.path, err)
+		linkMap[sl.path] = sl.linkname
+	}
+
+	for _, sl := range symlinks {
+		target := resolveSymlinkChain(sl.path, sl.linkname, linkMap)
+		if err := copyFile(target, sl.path); err != nil {
+			return fmt.Errorf("symlink fallback %s -> %s: %w", sl.path, target, err)
 		}
 	}
 	return nil
+}
+
+func resolveSymlinkChain(base, linkname string, linkMap map[string]string) string {
+	dir := filepath.Dir(base)
+	target := filepath.Join(dir, linkname)
+
+	// Follow chain up to maxSymlinkDepth times
+	for i := 0; i < maxSymlinkDepth; i++ {
+		next, ok := linkMap[target]
+		if !ok {
+			// Target is a real file, not a symlink
+			return target
+		}
+		target = filepath.Join(filepath.Dir(target), next)
+	}
+	return target
+}
+
+func copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", src, err)
+	}
+	defer srcFile.Close()
+
+	info, err := srcFile.Stat()
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", src, err)
+	}
+
+	return writeToFile(dst, srcFile, info.Mode())
 }
 
 func createSymlink(target, path string) error {
@@ -250,51 +297,6 @@ func writeToFile(path string, r io.Reader, mode os.FileMode) error {
 		return fmt.Errorf("close %s: %w", path, closeErr)
 	}
 	return nil
-}
-
-func copyFileResolved(src, dst string) error {
-	resolved, err := resolveSymlink(src)
-	if err != nil {
-		return err
-	}
-
-	srcFile, err := os.Open(resolved)
-	if err != nil {
-		return fmt.Errorf("open source: %w", err)
-	}
-	defer srcFile.Close()
-
-	info, err := srcFile.Stat()
-	if err != nil {
-		return fmt.Errorf("stat source: %w", err)
-	}
-
-	return writeToFile(dst, srcFile, info.Mode())
-}
-
-func resolveSymlink(path string) (string, error) {
-	resolved := path
-	for i := 0; i < maxSymlinkDepth; i++ {
-		info, err := os.Lstat(resolved)
-		if err != nil {
-			return "", fmt.Errorf("lstat %s: %w", resolved, err)
-		}
-		if info.Mode()&os.ModeSymlink == 0 {
-			return resolved, nil
-		}
-
-		link, err := os.Readlink(resolved)
-		if err != nil {
-			return "", fmt.Errorf("readlink %s: %w", resolved, err)
-		}
-
-		if filepath.IsAbs(link) {
-			resolved = link
-		} else {
-			resolved = filepath.Join(filepath.Dir(resolved), link)
-		}
-	}
-	return resolved, nil
 }
 
 func safePath(destDir, name string) (string, error) {

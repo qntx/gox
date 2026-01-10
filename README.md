@@ -268,9 +268,9 @@ Working examples are available in the [examples/](./example) directory:
 
 | Example | Description |
 | :--- | :--- |
+| [gocu](./example/gocu) | Cross-compile gocu with vendored C source |
 | [minimal](./example/minimal) | Basic CGO with inline C code |
 | [sqlite](./example/sqlite) | Cross-compile go-sqlite3 with vendored C source |
-| [zlib](./example/zlib) | Link against system zlib library |
 
 ## License
 
