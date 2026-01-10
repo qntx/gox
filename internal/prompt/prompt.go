@@ -8,12 +8,11 @@ import (
 	"github.com/qntx/gox/internal/build"
 )
 
-var targets = []struct {
-	name   string
-	goos   string
-	goarch string
-}{
-	// Linux
+type target struct {
+	name, goos, goarch string
+}
+
+var targets = []target{
 	{"linux/amd64", "linux", "amd64"},
 	{"linux/arm64", "linux", "arm64"},
 	{"linux/386", "linux", "386"},
@@ -22,17 +21,13 @@ var targets = []struct {
 	{"linux/loong64", "linux", "loong64"},
 	{"linux/ppc64le", "linux", "ppc64le"},
 	{"linux/s390x", "linux", "s390x"},
-	// macOS
 	{"darwin/amd64", "darwin", "amd64"},
 	{"darwin/arm64", "darwin", "arm64"},
-	// Windows
 	{"windows/amd64", "windows", "amd64"},
 	{"windows/386", "windows", "386"},
 	{"windows/arm64", "windows", "arm64"},
-	// FreeBSD
 	{"freebsd/amd64", "freebsd", "amd64"},
 	{"freebsd/386", "freebsd", "386"},
-	// NetBSD
 	{"netbsd/amd64", "netbsd", "amd64"},
 	{"netbsd/arm64", "netbsd", "arm64"},
 	{"netbsd/386", "netbsd", "386"},
@@ -41,40 +36,38 @@ var targets = []struct {
 
 var linkModes = []struct {
 	name  string
-	value string
+	value build.LinkMode
 }{
-	{"Auto (default)", "auto"},
-	{"Static linking", "static"},
-	{"Dynamic linking", "dynamic"},
+	{"Auto (default)", build.LinkModeAuto},
+	{"Static linking", build.LinkModeStatic},
+	{"Dynamic linking", build.LinkModeDynamic},
 }
 
 func Run(opts *build.Options) (*build.Options, error) {
-	var targetIdx int
-	var linkIdx int
-	var includeDirs, libDirs, libs string
-
-	targetOptions := make([]huh.Option[int], len(targets))
-	for i, t := range targets {
-		targetOptions[i] = huh.NewOption(t.name, i)
-	}
-
-	linkOptions := make([]huh.Option[int], len(linkModes))
-	for i, l := range linkModes {
-		linkOptions[i] = huh.NewOption(l.name, i)
-	}
+	var (
+		targetIdx            int
+		linkIdx              int
+		includeDirs, libDirs string
+		libs                 string
+	)
 
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[int]().
 				Title("Target Platform").
 				Description("Select the target OS/Architecture").
-				Options(targetOptions...).
+				Options(indexedOptions(targets, func(t target) string { return t.name })...).
 				Value(&targetIdx),
 
 			huh.NewSelect[int]().
 				Title("Link Mode").
 				Description("How to link C libraries").
-				Options(linkOptions...).
+				Options(indexedOptions(linkModes, func(l struct {
+					name  string
+					value build.LinkMode
+				}) string {
+					return l.name
+				})...).
 				Value(&linkIdx),
 		),
 
@@ -114,21 +107,25 @@ func Run(opts *build.Options) (*build.Options, error) {
 	opts.GOOS = targets[targetIdx].goos
 	opts.GOARCH = targets[targetIdx].goarch
 	opts.LinkMode = linkModes[linkIdx].value
-
-	if includeDirs != "" {
-		opts.IncludeDirs = splitTrim(includeDirs)
-	}
-	if libDirs != "" {
-		opts.LibDirs = splitTrim(libDirs)
-	}
-	if libs != "" {
-		opts.Libs = splitTrim(libs)
-	}
+	opts.IncludeDirs = splitTrim(includeDirs)
+	opts.LibDirs = splitTrim(libDirs)
+	opts.Libs = splitTrim(libs)
 
 	return opts, nil
 }
 
+func indexedOptions[T any](items []T, label func(T) string) []huh.Option[int] {
+	opts := make([]huh.Option[int], len(items))
+	for i, item := range items {
+		opts[i] = huh.NewOption(label(item), i)
+	}
+	return opts
+}
+
 func splitTrim(s string) []string {
+	if s == "" {
+		return nil
+	}
 	var result []string
 	for part := range strings.SplitSeq(s, ",") {
 		if p := strings.TrimSpace(part); p != "" {

@@ -47,15 +47,14 @@ func (b *Builder) Run(ctx context.Context, packages []string) error {
 		return err
 	}
 
-	if b.opts.Pack {
-		return b.createArchive()
+	if !b.opts.Pack {
+		return nil
 	}
-
-	return nil
+	return b.createArchive()
 }
 
 func (b *Builder) createArchive() error {
-	src := b.packSource()
+	src := cond(b.opts.Prefix != "", b.opts.Prefix, b.opts.Output)
 	if src == "" {
 		return fmt.Errorf("--pack requires --output or --prefix")
 	}
@@ -68,23 +67,14 @@ func (b *Builder) createArchive() error {
 	if b.opts.Verbose {
 		fmt.Fprintf(os.Stderr, "archive: %s\n", archive)
 	}
-
 	return nil
-}
-
-func (b *Builder) packSource() string {
-	if b.opts.Prefix != "" {
-		return b.opts.Prefix
-	}
-	return b.opts.Output
 }
 
 func (b *Builder) printVerbose(env, args []string) {
 	if output := b.resolveOutput(); output != "" {
 		fmt.Fprintf(os.Stderr, "output: %s\n", output)
 	}
-	fmt.Fprintf(os.Stderr, "env: %v\n", env)
-	fmt.Fprintf(os.Stderr, "go %s\n", strings.Join(args, " "))
+	fmt.Fprintf(os.Stderr, "env: %v\ngo %s\n", env, strings.Join(args, " "))
 }
 
 func (b *Builder) ensureOutputDir() error {
@@ -93,23 +83,15 @@ func (b *Builder) ensureOutputDir() error {
 		return nil
 	}
 
-	dir := filepath.Dir(output)
-	if dir == "" || dir == "." {
-		return nil
-	}
-
-	if err := os.MkdirAll(dir, dirPerm); err != nil {
-		return err
-	}
-
-	// Create lib directory when using prefix
-	if b.opts.Prefix != "" {
-		libDir := filepath.Join(b.opts.Prefix, "lib")
-		if err := os.MkdirAll(libDir, dirPerm); err != nil {
+	if dir := filepath.Dir(output); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, dirPerm); err != nil {
 			return err
 		}
 	}
 
+	if b.opts.Prefix != "" {
+		return os.MkdirAll(filepath.Join(b.opts.Prefix, "lib"), dirPerm)
+	}
 	return nil
 }
 
@@ -119,146 +101,99 @@ func (b *Builder) buildEnv() []string {
 		"CGO_ENABLED=1",
 		"GOOS=" + b.opts.GOOS,
 		"GOARCH=" + b.opts.GOARCH,
-		"CC=" + b.zigCC(target),
-		"CXX=" + b.zigCXX(target),
+		"CC=" + b.zigCmd("cc", target),
+		"CXX=" + b.zigCmd("c++", target),
 	}
-	if cflags := b.cgoCflags(); cflags != "" {
-		env = append(env, "CGO_CFLAGS="+cflags)
+	if v := b.cgoCflags(); v != "" {
+		env = append(env, "CGO_CFLAGS="+v)
 	}
-	if ldflags := b.cgoLdflags(); ldflags != "" {
-		env = append(env, "CGO_LDFLAGS="+ldflags)
+	if v := b.cgoLdflags(); v != "" {
+		env = append(env, "CGO_LDFLAGS="+v)
 	}
 	return env
 }
 
 func (b *Builder) cgoCflags() string {
-	if len(b.opts.IncludeDirs) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	for i, dir := range b.opts.IncludeDirs {
-		if i > 0 {
-			sb.WriteByte(' ')
-		}
-		sb.WriteString("-I")
-		sb.WriteString(dir)
-	}
-	return sb.String()
+	return prefixJoin("-I", b.opts.IncludeDirs)
 }
 
 func (b *Builder) cgoLdflags() string {
-	var sb strings.Builder
-	for _, dir := range b.opts.LibDirs {
-		if sb.Len() > 0 {
-			sb.WriteByte(' ')
-		}
-		sb.WriteString("-L")
-		sb.WriteString(dir)
-	}
-	for _, lib := range b.opts.Libs {
-		if sb.Len() > 0 {
-			sb.WriteByte(' ')
-		}
-		sb.WriteString("-l")
-		sb.WriteString(lib)
-	}
+	var flags []string
+	flags = appendPrefixed(flags, "-L", b.opts.LibDirs)
+	flags = appendPrefixed(flags, "-l", b.opts.Libs)
+
 	if b.opts.LinkMode == LinkModeStatic {
-		if sb.Len() > 0 {
-			sb.WriteByte(' ')
-		}
-		sb.WriteString("-static")
+		flags = append(flags, "-static")
 	}
-	// Add rpath when using prefix (unless disabled or static linking)
 	if b.shouldAddRpath() {
-		for _, flag := range b.rpathFlags() {
-			if sb.Len() > 0 {
-				sb.WriteByte(' ')
-			}
-			sb.WriteString(flag)
-		}
+		flags = append(flags, b.rpathFlag())
 	}
-	return sb.String()
+	return strings.Join(flags, " ")
 }
 
 func (b *Builder) shouldAddRpath() bool {
 	return b.opts.Prefix != "" && !b.opts.NoRpath && b.opts.LinkMode != LinkModeStatic
 }
 
-func (b *Builder) rpathFlags() []string {
+func (b *Builder) rpathFlag() string {
 	switch b.opts.GOOS {
 	case "linux", "freebsd", "netbsd":
-		return []string{"-Wl,-rpath,$ORIGIN/../lib"}
+		return "-Wl,-rpath,$ORIGIN/../lib"
 	case "darwin":
-		return []string{"-Wl,-rpath,@executable_path/../lib"}
-	default:
-		return nil
+		return "-Wl,-rpath,@executable_path/../lib"
 	}
+	return ""
 }
 
 func (b *Builder) buildArgs(packages []string) []string {
 	args := []string{"build"}
 
-	output := b.resolveOutput()
-	if output != "" {
+	if output := b.resolveOutput(); output != "" {
 		args = append(args, "-o", output)
 	}
 
-	// Build ldflags
-	var ldflags []string
-
-	// macOS cross-compile: disable DWARF to avoid dsymutil requirement
-	if b.opts.GOOS == "darwin" && runtime.GOOS != "darwin" {
-		ldflags = append(ldflags, "-w")
-	}
-
-	switch b.opts.LinkMode {
-	case LinkModeStatic:
-		ldflags = append(ldflags, "-linkmode=external", `-extldflags "-static"`)
-	case LinkModeDynamic:
-		ldflags = append(ldflags, "-linkmode=external")
-	}
-
-	if len(ldflags) > 0 {
-		args = append(args, "-ldflags="+strings.Join(ldflags, " "))
+	if ldflags := b.ldflags(); ldflags != "" {
+		args = append(args, "-ldflags="+ldflags)
 	}
 
 	args = append(args, b.opts.BuildFlags...)
 
 	if len(packages) > 0 {
-		args = append(args, packages...)
-	} else {
-		args = append(args, ".")
+		return append(args, packages...)
+	}
+	return append(args, ".")
+}
+
+func (b *Builder) ldflags() string {
+	var flags []string
+
+	if b.opts.GOOS == "darwin" && runtime.GOOS != "darwin" {
+		flags = append(flags, "-w")
 	}
 
-	return args
+	switch b.opts.LinkMode {
+	case LinkModeStatic:
+		flags = append(flags, "-linkmode=external", `-extldflags "-static"`)
+	case LinkModeDynamic:
+		flags = append(flags, "-linkmode=external")
+	}
+
+	return strings.Join(flags, " ")
 }
 
 func (b *Builder) resolveOutput() string {
-	// Explicit output takes highest priority
 	if b.opts.Output != "" {
 		return b.opts.Output
 	}
-
-	// No prefix means let Go decide output location
 	if b.opts.Prefix == "" {
 		return ""
 	}
 
-	// Use prefix basename as executable name
 	exeName := filepath.Base(b.opts.Prefix)
 	if b.opts.GOOS == "windows" {
 		exeName += exeSuffix
 	}
-
 	return filepath.Join(b.opts.Prefix, "bin", exeName)
-}
-
-func (b *Builder) zigCC(target string) string {
-	return b.zigCmd("cc", target)
-}
-
-func (b *Builder) zigCXX(target string) string {
-	return b.zigCmd("c++", target)
 }
 
 func (b *Builder) zigCmd(compiler, target string) string {
@@ -267,4 +202,29 @@ func (b *Builder) zigCmd(compiler, target string) string {
 		zigBin += exeSuffix
 	}
 	return fmt.Sprintf("%s %s -target %s", zigBin, compiler, target)
+}
+
+func prefixJoin(prefix string, items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	parts := make([]string, len(items))
+	for i, item := range items {
+		parts[i] = prefix + item
+	}
+	return strings.Join(parts, " ")
+}
+
+func appendPrefixed(dst []string, prefix string, items []string) []string {
+	for _, item := range items {
+		dst = append(dst, prefix+item)
+	}
+	return dst
+}
+
+func cond(ok bool, a, b string) string {
+	if ok {
+		return a
+	}
+	return b
 }

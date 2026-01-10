@@ -11,45 +11,26 @@ import (
 )
 
 func Archive(src, goos, goarch string) (string, error) {
-	name := filepath.Base(src)
-	archiveName := fmt.Sprintf("%s-%s-%s%s", name, goos, goarch, archiveExt(goos))
-
-	dir := filepath.Dir(src)
-	archivePath := filepath.Join(dir, archiveName)
-
 	info, err := os.Stat(src)
 	if err != nil {
 		return "", fmt.Errorf("stat source: %w", err)
 	}
 
-	if info.IsDir() {
-		return archivePath, archiveDir(src, archivePath, goos)
-	}
-	return archivePath, archiveFile(src, archivePath, goos)
-}
-
-func archiveExt(goos string) string {
+	ext := ".tar.gz"
 	if goos == "windows" {
-		return ".zip"
+		ext = ".zip"
 	}
-	return ".tar.gz"
-}
 
-func archiveDir(src, dest, goos string) error {
+	dest := filepath.Join(filepath.Dir(src),
+		fmt.Sprintf("%s-%s-%s%s", filepath.Base(src), goos, goarch, ext))
+
 	if goos == "windows" {
-		return createZipDir(src, dest)
+		return dest, createZip(src, dest, info.IsDir())
 	}
-	return createTarGzDir(src, dest)
+	return dest, createTarGz(src, dest, info.IsDir())
 }
 
-func archiveFile(src, dest, goos string) error {
-	if goos == "windows" {
-		return createZipFile(src, dest)
-	}
-	return createTarGzFile(src, dest)
-}
-
-func createTarGzDir(src, dest string) error {
+func createTarGz(src, dest string, isDir bool) error {
 	f, err := os.Create(dest)
 	if err != nil {
 		return err
@@ -62,7 +43,17 @@ func createTarGzDir(src, dest string) error {
 	tw := tar.NewWriter(gw)
 	defer tw.Close()
 
+	if !isDir {
+		return addTarFile(tw, src, filepath.Base(src))
+	}
+
+	baseDir := filepath.Dir(src)
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(baseDir, path)
 		if err != nil {
 			return err
 		}
@@ -71,18 +62,11 @@ func createTarGzDir(src, dest string) error {
 		if err != nil {
 			return err
 		}
-
-		relPath, err := filepath.Rel(filepath.Dir(src), path)
-		if err != nil {
-			return err
-		}
 		header.Name = filepath.ToSlash(relPath)
 
 		if info.IsDir() {
 			header.Name += "/"
-		}
-
-		if info.Mode()&os.ModeSymlink != 0 {
+		} else if info.Mode()&os.ModeSymlink != 0 {
 			link, err := os.Readlink(path)
 			if err != nil {
 				return err
@@ -98,31 +82,11 @@ func createTarGzDir(src, dest string) error {
 		if !info.Mode().IsRegular() {
 			return nil
 		}
-
-		file, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-
-		_, err = io.Copy(tw, file)
-		return err
+		return copyFile(tw, path)
 	})
 }
 
-func createTarGzFile(src, dest string) error {
-	f, err := os.Create(dest)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	gw := gzip.NewWriter(f)
-	defer gw.Close()
-
-	tw := tar.NewWriter(gw)
-	defer tw.Close()
-
+func addTarFile(tw *tar.Writer, src, name string) error {
 	info, err := os.Stat(src)
 	if err != nil {
 		return err
@@ -132,23 +96,15 @@ func createTarGzFile(src, dest string) error {
 	if err != nil {
 		return err
 	}
-	header.Name = filepath.Base(src)
+	header.Name = name
 
 	if err := tw.WriteHeader(header); err != nil {
 		return err
 	}
-
-	file, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	_, err = io.Copy(tw, file)
-	return err
+	return copyFile(tw, src)
 }
 
-func createZipDir(src, dest string) error {
+func createZip(src, dest string, isDir bool) error {
 	f, err := os.Create(dest)
 	if err != nil {
 		return err
@@ -158,12 +114,17 @@ func createZipDir(src, dest string) error {
 	zw := zip.NewWriter(f)
 	defer zw.Close()
 
+	if !isDir {
+		return addZipFile(zw, src, filepath.Base(src))
+	}
+
+	baseDir := filepath.Dir(src)
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
-		relPath, err := filepath.Rel(filepath.Dir(src), path)
+		relPath, err := filepath.Rel(baseDir, path)
 		if err != nil {
 			return err
 		}
@@ -185,28 +146,11 @@ func createZipDir(src, dest string) error {
 		if err != nil {
 			return err
 		}
-
-		file, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-
-		_, err = io.Copy(w, file)
-		return err
+		return copyFile(w, path)
 	})
 }
 
-func createZipFile(src, dest string) error {
-	f, err := os.Create(dest)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	zw := zip.NewWriter(f)
-	defer zw.Close()
-
+func addZipFile(zw *zip.Writer, src, name string) error {
 	info, err := os.Stat(src)
 	if err != nil {
 		return err
@@ -216,20 +160,22 @@ func createZipFile(src, dest string) error {
 	if err != nil {
 		return err
 	}
-	header.Name = filepath.Base(src)
+	header.Name = name
 	header.Method = zip.Deflate
 
 	w, err := zw.CreateHeader(header)
 	if err != nil {
 		return err
 	}
+	return copyFile(w, src)
+}
 
-	file, err := os.Open(src)
+func copyFile(w io.Writer, path string) error {
+	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-
-	_, err = io.Copy(w, file)
+	defer f.Close()
+	_, err = io.Copy(w, f)
 	return err
 }
