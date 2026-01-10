@@ -67,12 +67,86 @@ gox build --os windows --arch amd64 --prefix ./myapp --pack
 # → ./myapp/bin/myapp.exe, ./myapp-windows-amd64.zip
 ```
 
+## Configuration File
+
+Create a `gox.toml` file in your project root to define reusable build configurations:
+
+```toml
+[default]
+zig-version = "0.15.2"
+verbose = true
+
+[[target]]
+name = "linux-cuda"
+os = "linux"
+arch = "amd64"
+include = ["C:\\cuda\\include"]
+lib = ["./lib"]
+link = ["cudart", "cublas"]
+prefix = "./dist/linux"
+flags = ["-tags=cuda"]
+
+[[target]]
+name = "windows-release"
+os = "windows"
+arch = "amd64"
+linkmode = "static"
+prefix = "./dist/windows"
+pack = true
+```
+
+```bash
+# Use first target in config (or interactive if no targets defined)
+gox build
+
+# Use specific target
+gox build --target linux-cuda
+
+# CLI flags override config values
+gox build --target linux-cuda --verbose=false
+
+# Specify custom config file
+gox build --config ./build/gox.toml --target linux-cuda
+```
+
+### Configuration Reference
+
+**`[default]`** — Global defaults applied to all targets:
+
+| Key | Type | Description |
+| :--- | :--- | :--- |
+| `zig-version` | string | Zig compiler version |
+| `verbose` | bool | Enable verbose output |
+| `pack` | bool | Create archive after build |
+| `linkmode` | string | Link mode: `auto`, `static`, `dynamic` |
+
+**`[[target]]`** — Build target definitions (can define multiple):
+
+| Key | Type | Description |
+| :--- | :--- | :--- |
+| `name` | string | Target identifier for `--target` flag |
+| `os` | string | Target operating system |
+| `arch` | string | Target architecture |
+| `output` | string | Output binary path |
+| `prefix` | string | Output prefix directory |
+| `no-rpath` | bool | Disable rpath |
+| `include` | []string | C header include directories |
+| `lib` | []string | Library search directories |
+| `link` | []string | Libraries to link |
+| `linkmode` | string | Link mode (overrides default) |
+| `flags` | []string | Additional go build flags |
+| `zig-version` | string | Zig version (overrides default) |
+| `verbose` | bool | Verbose output (overrides default) |
+| `pack` | bool | Create archive (overrides default) |
+
 ## Command Reference
 
 ### `gox build`
 
 | Flag | Short | Description |
 | :--- | :---: | :--- |
+| `--config` | `-c` | Config file path (default: `gox.toml`) |
+| `--target` | `-t` | Build target name from config |
 | `--os` | | Target operating system |
 | `--arch` | | Target architecture |
 | `--output` | `-o` | Output binary path |

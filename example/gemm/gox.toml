@@ -1,0 +1,23 @@
+[default]
+zig-version = "0.15.2"
+verbose = true
+
+[[target]]
+name = "linux-cuda"
+os = "linux"
+arch = "amd64"
+include = ["C:\\cuda\\include"]
+lib = ["./lib"]
+link = ["cudart", "cublas"]
+prefix = "./gemm"
+flags = ["-tags=cuda"]
+
+[[target]]
+name = "windows-cuda"
+os = "windows"
+arch = "amd64"
+include = ["C:\\cuda\\include"]
+lib = ["C:\\cuda\\lib\\x64"]
+link = ["cudart", "cublas"]
+prefix = "./gemm-win"
+flags = ["-tags=cuda"]
