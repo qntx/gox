@@ -6,10 +6,19 @@ import (
 	"os"
 
 	"github.com/qntx/gox/internal/build"
-	"github.com/qntx/gox/internal/tui"
 	"github.com/qntx/gox/internal/zig"
 	"github.com/spf13/cobra"
 )
+
+// buildFlags holds CLI flag values for the build command.
+type buildFlags struct {
+	config   string
+	targets  []string
+	linkMode string
+	opts     build.Options
+}
+
+var bf buildFlags
 
 var buildCmd = &cobra.Command{
 	Use:   "build [packages]",
@@ -24,56 +33,56 @@ Use --target to build specific targets (comma-separated or repeated).`,
 	RunE: runBuild,
 }
 
-var (
-	configFile  string
-	targetNames []string
-	cliOpts     build.Options
-	linkMode    string
-)
-
 func init() {
 	f := buildCmd.Flags()
-	f.StringVarP(&configFile, "config", "c", "", "config file path (default: gox.toml)")
-	f.StringSliceVarP(&targetNames, "target", "t", nil, "build targets (comma-separated or repeated)")
-	f.StringVarP(&cliOpts.Output, "output", "o", "", "output file path")
-	f.StringVar(&cliOpts.Prefix, "prefix", "", "output prefix directory (creates bin/lib structure)")
-	f.BoolVar(&cliOpts.NoRpath, "no-rpath", false, "disable rpath when using --prefix")
-	f.StringVar(&cliOpts.GOOS, "os", "", "target operating system")
-	f.StringVar(&cliOpts.GOARCH, "arch", "", "target architecture")
-	f.StringVar(&cliOpts.ZigVersion, "zig-version", "", "zig compiler version")
-	f.StringSliceVarP(&cliOpts.IncludeDirs, "include", "I", nil, "C header include directories")
-	f.StringSliceVarP(&cliOpts.LibDirs, "lib", "L", nil, "library search directories")
-	f.StringSliceVarP(&cliOpts.Libs, "link", "l", nil, "libraries to link")
-	f.StringVar(&linkMode, "linkmode", "", "link mode: static, dynamic, or auto")
-	f.StringSliceVar(&cliOpts.BuildFlags, "flags", nil, "additional go build flags")
-	f.BoolVar(&cliOpts.Pack, "pack", false, "create archive after build")
-	f.BoolVarP(&cliOpts.Interactive, "interactive", "i", false, "interactive mode")
-	f.BoolVarP(&cliOpts.Verbose, "verbose", "v", false, "verbose output")
+
+	// Config and targets
+	f.StringVarP(&bf.config, "config", "c", "", "config file path (default: gox.toml)")
+	f.StringSliceVarP(&bf.targets, "target", "t", nil, "build targets (comma-separated or repeated)")
+
+	// Output
+	f.StringVarP(&bf.opts.Output, "output", "o", "", "output file path")
+	f.StringVar(&bf.opts.Prefix, "prefix", "", "output prefix directory (creates bin/lib structure)")
+	f.BoolVar(&bf.opts.NoRpath, "no-rpath", false, "disable rpath when using --prefix")
+	f.BoolVar(&bf.opts.Pack, "pack", false, "create archive after build")
+
+	// Target platform
+	f.StringVar(&bf.opts.GOOS, "os", "", "target operating system")
+	f.StringVar(&bf.opts.GOARCH, "arch", "", "target architecture")
+
+	// Toolchain
+	f.StringVar(&bf.opts.ZigVersion, "zig-version", "", "zig compiler version")
+	f.StringVar(&bf.linkMode, "linkmode", "", "link mode: static, dynamic, or auto")
+
+	// Dependencies
+	f.StringSliceVarP(&bf.opts.IncludeDirs, "include", "I", nil, "C header include directories")
+	f.StringSliceVarP(&bf.opts.LibDirs, "lib", "L", nil, "library search directories")
+	f.StringSliceVarP(&bf.opts.Libs, "link", "l", nil, "libraries to link")
+	f.StringSliceVar(&bf.opts.Packages, "pkg", nil, "packages to download (owner/repo@version/asset or URL)")
+
+	// Build options
+	f.StringSliceVar(&bf.opts.BuildFlags, "flags", nil, "additional go build flags")
+	f.BoolVarP(&bf.opts.Verbose, "verbose", "v", false, "verbose output")
+
+	rootCmd.AddCommand(buildCmd)
 }
 
 func runBuild(cmd *cobra.Command, args []string) error {
-	optsList, err := loadOptions(cmd)
+	optsList, err := resolveOptions(cmd)
 	if err != nil {
 		return err
 	}
 
+	total := len(optsList)
 	for i, opts := range optsList {
-		if err := runSingleBuild(cmd, args, opts, i, len(optsList)); err != nil {
+		if err := executeBuild(cmd, args, opts, i, total); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func runSingleBuild(cmd *cobra.Command, args []string, opts *build.Options, idx, total int) error {
-	if opts.Interactive || (opts.GOOS == "" && opts.GOARCH == "") {
-		p, err := tui.SelectTarget(opts)
-		if err != nil {
-			return fmt.Errorf("prompt: %w", err)
-		}
-		opts = p
-	}
-
+func executeBuild(cmd *cobra.Command, args []string, opts *build.Options, idx, total int) error {
 	opts.Normalize()
 	if err := opts.Validate(); err != nil {
 		return err
@@ -94,15 +103,15 @@ func runSingleBuild(cmd *cobra.Command, args []string, opts *build.Options, idx,
 	return build.New(zigPath, opts).Run(cmd.Context(), args)
 }
 
-func loadOptions(cmd *cobra.Command) ([]*build.Options, error) {
-	cfg, err := build.LoadConfig(configFile)
+func resolveOptions(cmd *cobra.Command) ([]*build.Options, error) {
+	cfg, err := build.LoadConfig(bf.config)
 	if err != nil && !errors.Is(err, build.ErrConfigNotFound) {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 
 	var optsList []*build.Options
 	if cfg != nil {
-		optsList, err = cfg.ToOptions(targetNames)
+		optsList, err = cfg.ToOptions(bf.targets)
 		if err != nil {
 			return nil, fmt.Errorf("config: %w", err)
 		}
@@ -111,54 +120,58 @@ func loadOptions(cmd *cobra.Command) ([]*build.Options, error) {
 	}
 
 	for _, opts := range optsList {
-		mergeCliFlags(cmd, opts)
+		applyFlags(cmd, opts)
 	}
 	return optsList, nil
 }
 
-func mergeCliFlags(cmd *cobra.Command, opts *build.Options) {
-	flags := cmd.Flags()
+// applyFlags merges CLI flags into options, overriding config values.
+func applyFlags(cmd *cobra.Command, opts *build.Options) {
+	f := cmd.Flags()
 
-	if flags.Changed("os") {
-		opts.GOOS = cliOpts.GOOS
+	// String fields
+	applyString(f, "os", &opts.GOOS, bf.opts.GOOS)
+	applyString(f, "arch", &opts.GOARCH, bf.opts.GOARCH)
+	applyString(f, "output", &opts.Output, bf.opts.Output)
+	applyString(f, "prefix", &opts.Prefix, bf.opts.Prefix)
+	applyString(f, "zig-version", &opts.ZigVersion, bf.opts.ZigVersion)
+
+	// Slice fields
+	applySlice(f, "include", &opts.IncludeDirs, bf.opts.IncludeDirs)
+	applySlice(f, "lib", &opts.LibDirs, bf.opts.LibDirs)
+	applySlice(f, "link", &opts.Libs, bf.opts.Libs)
+	applySlice(f, "pkg", &opts.Packages, bf.opts.Packages)
+	applySlice(f, "flags", &opts.BuildFlags, bf.opts.BuildFlags)
+
+	// Bool fields
+	applyBool(f, "no-rpath", &opts.NoRpath, bf.opts.NoRpath)
+	applyBool(f, "pack", &opts.Pack, bf.opts.Pack)
+	applyBool(f, "verbose", &opts.Verbose, bf.opts.Verbose)
+
+	// LinkMode
+	if f.Changed("linkmode") {
+		opts.LinkMode = build.LinkMode(bf.linkMode)
 	}
-	if flags.Changed("arch") {
-		opts.GOARCH = cliOpts.GOARCH
+}
+
+type flagSet interface {
+	Changed(string) bool
+}
+
+func applyString(f flagSet, name string, dst *string, src string) {
+	if f.Changed(name) {
+		*dst = src
 	}
-	if flags.Changed("output") {
-		opts.Output = cliOpts.Output
+}
+
+func applySlice(f flagSet, name string, dst *[]string, src []string) {
+	if f.Changed(name) {
+		*dst = src
 	}
-	if flags.Changed("prefix") {
-		opts.Prefix = cliOpts.Prefix
-	}
-	if flags.Changed("no-rpath") {
-		opts.NoRpath = cliOpts.NoRpath
-	}
-	if flags.Changed("zig-version") {
-		opts.ZigVersion = cliOpts.ZigVersion
-	}
-	if flags.Changed("include") {
-		opts.IncludeDirs = cliOpts.IncludeDirs
-	}
-	if flags.Changed("lib") {
-		opts.LibDirs = cliOpts.LibDirs
-	}
-	if flags.Changed("link") {
-		opts.Libs = cliOpts.Libs
-	}
-	if flags.Changed("linkmode") {
-		opts.LinkMode = build.LinkMode(linkMode)
-	}
-	if flags.Changed("flags") {
-		opts.BuildFlags = cliOpts.BuildFlags
-	}
-	if flags.Changed("pack") {
-		opts.Pack = cliOpts.Pack
-	}
-	if flags.Changed("interactive") {
-		opts.Interactive = cliOpts.Interactive
-	}
-	if flags.Changed("verbose") {
-		opts.Verbose = cliOpts.Verbose
+}
+
+func applyBool(f flagSet, name string, dst *bool, src bool) {
+	if f.Changed(name) {
+		*dst = src
 	}
 }

@@ -19,14 +19,10 @@ go install github.com/qntx/gox/cmd/gox@latest
 ## Quick Start
 
 ```bash
-gox build                                            # Interactive mode (TUI)
+gox build                                            # Build for current platform
 gox build --os linux --arch arm64                    # Cross-compile to Linux ARM64
-gox build --os linux --arch amd64 --linkmode static  # Static binary
+gox build --os linux --arch amd64 --linkmode static  # Static binary with musl
 ```
-
-## Demo
-
-![gox demo](gox.gif)
 
 ## Usage
 
@@ -96,10 +92,10 @@ pack = true
 ```
 
 ```bash
-# Use first target in config (or interactive if no targets defined)
+# Build all targets in config
 gox build
 
-# Use specific target
+# Build specific target
 gox build --target linux-cuda
 
 # CLI flags override config values
@@ -133,11 +129,53 @@ gox build --config ./build/gox.toml --target linux-cuda
 | `include` | []string | C header include directories |
 | `lib` | []string | Library search directories |
 | `link` | []string | Libraries to link |
+| `packages` | []string | Pre-built packages to download |
 | `linkmode` | string | Link mode (overrides default) |
 | `flags` | []string | Additional go build flags |
 | `zig-version` | string | Zig version (overrides default) |
 | `verbose` | bool | Verbose output (overrides default) |
 | `pack` | bool | Create archive (overrides default) |
+
+## Package Management
+
+Automatically download and configure pre-built libraries for cross-compilation:
+
+```bash
+# GitHub Release format: owner/repo@version/asset
+gox build --os linux --arch amd64 --pkg qntx/libs@1.0.0/cuda-linux-amd64.tar.gz
+
+# Direct URL format
+gox build --os linux --arch amd64 --pkg https://example.com/openssl-1.1.1-linux.tar.gz
+
+# Multiple packages
+gox build --pkg qntx/cuda@1.0/cuda-linux.tar.gz --pkg qntx/ssl@3.0/ssl-linux.tar.gz
+```
+
+TOML configuration:
+
+```toml
+[[target]]
+name = "linux-cuda"
+os = "linux"
+arch = "amd64"
+packages = [
+  "qntx/cuda@13.1.0/cuda-linux-amd64.tar.gz",
+  "qntx/ssl@3.0/openssl-linux-amd64.tar.gz"
+]
+link = ["cudart", "cublas", "ssl", "crypto"]
+```
+
+**Package Structure Requirements:**
+
+Downloaded packages must contain `include/` and/or `lib/` directories:
+
+```text
+package.tar.gz
+├── include/     # → automatically added to CGO_CFLAGS -I
+└── lib/         # → automatically added to CGO_LDFLAGS -L
+```
+
+**Cache Location:** `~/.cache/gox/pkg/`
 
 ## Command Reference
 
@@ -157,9 +195,9 @@ gox build --config ./build/gox.toml --target linux-cuda
 | `--include` | `-I` | C header include directories (repeatable) |
 | `--lib` | `-L` | Library search directories (repeatable) |
 | `--link` | `-l` | Libraries to link (repeatable) |
+| `--pkg` | | Pre-built packages to download (repeatable) |
 | `--zig-version` | | Zig compiler version (default: `master`) |
 | `--flags` | | Additional flags passed to `go build` (repeatable) |
-| `--interactive` | `-i` | Launch interactive TUI for configuration |
 | `--verbose` | `-v` | Print detailed build information |
 
 ### `gox zig`

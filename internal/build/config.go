@@ -13,35 +13,40 @@ const ConfigFile = "gox.toml"
 
 var ErrConfigNotFound = errors.New("config file not found")
 
+// Config represents the gox.toml configuration file.
 type Config struct {
 	Default ConfigDefault  `toml:"default"`
 	Targets []ConfigTarget `toml:"target"`
 }
 
+// ConfigDefault holds default values applied to all targets.
 type ConfigDefault struct {
 	ZigVersion string `toml:"zig-version"`
+	LinkMode   string `toml:"linkmode"`
 	Verbose    bool   `toml:"verbose"`
 	Pack       bool   `toml:"pack"`
-	LinkMode   string `toml:"linkmode"`
 }
 
+// ConfigTarget defines a build target configuration.
 type ConfigTarget struct {
 	Name       string   `toml:"name"`
 	OS         string   `toml:"os"`
 	Arch       string   `toml:"arch"`
 	Output     string   `toml:"output"`
 	Prefix     string   `toml:"prefix"`
-	NoRpath    bool     `toml:"no-rpath"`
+	ZigVersion string   `toml:"zig-version"`
+	LinkMode   string   `toml:"linkmode"`
 	Include    []string `toml:"include"`
 	Lib        []string `toml:"lib"`
 	Link       []string `toml:"link"`
-	LinkMode   string   `toml:"linkmode"`
+	Packages   []string `toml:"packages"`
 	Flags      []string `toml:"flags"`
-	ZigVersion string   `toml:"zig-version"`
+	NoRpath    bool     `toml:"no-rpath"`
 	Verbose    bool     `toml:"verbose"`
 	Pack       bool     `toml:"pack"`
 }
 
+// LoadConfig loads configuration from path, or searches upward from cwd if empty.
 func LoadConfig(path string) (*Config, error) {
 	if path == "" {
 		path = findConfigFile()
@@ -62,7 +67,6 @@ func LoadConfig(path string) (*Config, error) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-
 	return &cfg, nil
 }
 
@@ -72,21 +76,18 @@ func findConfigFile() string {
 		return ""
 	}
 
-	for dir := cwd; ; {
+	for dir := cwd; ; dir = filepath.Dir(dir) {
 		path := filepath.Join(dir, ConfigFile)
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
+		if parent := filepath.Dir(dir); parent == dir {
+			return ""
 		}
-		dir = parent
 	}
-	return ""
 }
 
+// FindTarget returns the target with the given name.
 func (c *Config) FindTarget(name string) (*ConfigTarget, error) {
 	for i := range c.Targets {
 		if c.Targets[i].Name == name {
@@ -96,13 +97,10 @@ func (c *Config) FindTarget(name string) (*ConfigTarget, error) {
 	return nil, fmt.Errorf("target %q not found", name)
 }
 
+// FindTargets returns targets by names, or all targets if names is empty.
 func (c *Config) FindTargets(names []string) ([]*ConfigTarget, error) {
 	if len(names) == 0 {
-		targets := make([]*ConfigTarget, len(c.Targets))
-		for i := range c.Targets {
-			targets[i] = &c.Targets[i]
-		}
-		return targets, nil
+		return c.allTargets(), nil
 	}
 
 	targets := make([]*ConfigTarget, 0, len(names))
@@ -116,6 +114,15 @@ func (c *Config) FindTargets(names []string) ([]*ConfigTarget, error) {
 	return targets, nil
 }
 
+func (c *Config) allTargets() []*ConfigTarget {
+	targets := make([]*ConfigTarget, len(c.Targets))
+	for i := range c.Targets {
+		targets[i] = &c.Targets[i]
+	}
+	return targets
+}
+
+// TargetNames returns the names of all configured targets.
 func (c *Config) TargetNames() []string {
 	names := make([]string, len(c.Targets))
 	for i, t := range c.Targets {
@@ -124,6 +131,7 @@ func (c *Config) TargetNames() []string {
 	return names
 }
 
+// ToOptions converts targets to build Options.
 func (c *Config) ToOptions(names []string) ([]*Options, error) {
 	targets, err := c.FindTargets(names)
 	if err != nil {
@@ -131,7 +139,7 @@ func (c *Config) ToOptions(names []string) ([]*Options, error) {
 	}
 
 	if len(targets) == 0 {
-		return []*Options{c.defaultOptions()}, nil
+		return []*Options{c.baseOptions()}, nil
 	}
 
 	opts := make([]*Options, len(targets))
@@ -141,38 +149,40 @@ func (c *Config) ToOptions(names []string) ([]*Options, error) {
 	return opts, nil
 }
 
-func (c *Config) defaultOptions() *Options {
+func (c *Config) baseOptions() *Options {
 	return &Options{
 		ZigVersion: c.Default.ZigVersion,
+		LinkMode:   LinkMode(c.Default.LinkMode),
 		Verbose:    c.Default.Verbose,
 		Pack:       c.Default.Pack,
-		LinkMode:   LinkMode(c.Default.LinkMode),
 	}
 }
 
 func (c *Config) targetToOptions(t *ConfigTarget) *Options {
-	opts := c.defaultOptions()
-	opts.GOOS = t.OS
-	opts.GOARCH = t.Arch
-	opts.Output = t.Output
-	opts.Prefix = t.Prefix
-	opts.NoRpath = t.NoRpath
-	opts.IncludeDirs = t.Include
-	opts.LibDirs = t.Lib
-	opts.Libs = t.Link
-	opts.BuildFlags = t.Flags
+	o := c.baseOptions()
 
+	o.GOOS = t.OS
+	o.GOARCH = t.Arch
+	o.Output = t.Output
+	o.Prefix = t.Prefix
+	o.NoRpath = t.NoRpath
+	o.IncludeDirs = t.Include
+	o.LibDirs = t.Lib
+	o.Libs = t.Link
+	o.Packages = t.Packages
+	o.BuildFlags = t.Flags
+
+	// Target-level overrides
 	if t.ZigVersion != "" {
-		opts.ZigVersion = t.ZigVersion
+		o.ZigVersion = t.ZigVersion
 	}
 	if t.LinkMode != "" {
-		opts.LinkMode = LinkMode(t.LinkMode)
+		o.LinkMode = LinkMode(t.LinkMode)
 	}
-	if t.Verbose {
-		opts.Verbose = true
-	}
-	if t.Pack {
-		opts.Pack = true
-	}
-	return opts
+
+	// Boolean flags: target true overrides default
+	o.Verbose = o.Verbose || t.Verbose
+	o.Pack = o.Pack || t.Pack
+
+	return o
 }

@@ -7,6 +7,7 @@ import (
 	"runtime"
 )
 
+// LinkMode specifies how to link the binary.
 type LinkMode string
 
 const (
@@ -15,43 +16,46 @@ const (
 	LinkModeDynamic LinkMode = "dynamic"
 )
 
-func (m LinkMode) Valid() bool {
-	switch m {
-	case LinkModeAuto, LinkModeStatic, LinkModeDynamic:
-		return true
-	}
-	return false
+var validLinkModes = map[LinkMode]bool{
+	LinkModeAuto: true, LinkModeStatic: true, LinkModeDynamic: true,
 }
 
+func (m LinkMode) Valid() bool { return validLinkModes[m] }
+
+func (m LinkMode) IsStatic() bool { return m == LinkModeStatic }
+
+// Zig target mappings
 var (
-	archMap = map[string]string{
+	zigArch = map[string]string{
 		"amd64": "x86_64", "386": "x86", "arm64": "aarch64",
 		"arm": "arm", "riscv64": "riscv64", "loong64": "loongarch64",
 		"ppc64le": "powerpc64le", "s390x": "s390x",
 	}
-	osMap = map[string]string{
+	zigOS = map[string]string{
 		"linux": "linux-gnu", "darwin": "macos", "windows": "windows-gnu",
 		"freebsd": "freebsd", "netbsd": "netbsd",
 	}
 )
 
+// Options configures a build operation.
 type Options struct {
-	Output      string
-	Prefix      string
-	NoRpath     bool
-	Pack        bool
 	GOOS        string
 	GOARCH      string
+	Output      string
+	Prefix      string
 	ZigVersion  string
 	IncludeDirs []string
 	LibDirs     []string
 	Libs        []string
-	LinkMode    LinkMode
+	Packages    []string
 	BuildFlags  []string
-	Interactive bool
+	LinkMode    LinkMode
+	NoRpath     bool
+	Pack        bool
 	Verbose     bool
 }
 
+// Normalize applies defaults for unset fields.
 func (o *Options) Normalize() {
 	if o.GOOS == "" {
 		o.GOOS = runtime.GOOS
@@ -67,9 +71,10 @@ func (o *Options) Normalize() {
 	}
 }
 
+// Validate checks option constraints.
 func (o *Options) Validate() error {
 	if !o.LinkMode.Valid() {
-		return fmt.Errorf("invalid linkmode %q: must be static, dynamic, or auto", o.LinkMode)
+		return fmt.Errorf("invalid linkmode %q: must be auto, static, or dynamic", o.LinkMode)
 	}
 	if o.Output != "" && o.Prefix != "" {
 		return errors.New("cannot specify both --output and --prefix")
@@ -83,35 +88,40 @@ func (o *Options) Validate() error {
 	return nil
 }
 
+// ZigTarget returns the Zig cross-compilation target string.
 func (o *Options) ZigTarget() string {
-	arch := mapOr(archMap, o.GOARCH, o.GOARCH)
-	osTarget := o.zigOS()
-	return arch + "-" + osTarget
+	return o.zigArch() + "-" + o.zigOSTarget()
 }
 
-func (o *Options) zigOS() string {
+func (o *Options) zigArch() string {
+	if v, ok := zigArch[o.GOARCH]; ok {
+		return v
+	}
+	return o.GOARCH
+}
+
+func (o *Options) zigOSTarget() string {
 	if o.GOOS == "linux" {
 		return o.linuxTarget()
 	}
-	return mapOr(osMap, o.GOOS, o.GOOS)
+	if v, ok := zigOS[o.GOOS]; ok {
+		return v
+	}
+	return o.GOOS
 }
 
 func (o *Options) linuxTarget() string {
-	if o.GOARCH == "arm" {
-		if o.LinkMode == LinkModeStatic {
-			return "linux-musleabihf"
-		}
-		return "linux-gnueabihf"
-	}
-	if o.LinkMode == LinkModeStatic {
-		return "linux-musl"
-	}
-	return "linux-gnu"
-}
+	isArm := o.GOARCH == "arm"
+	isStatic := o.LinkMode.IsStatic()
 
-func mapOr(m map[string]string, key, fallback string) string {
-	if v, ok := m[key]; ok {
-		return v
+	switch {
+	case isArm && isStatic:
+		return "linux-musleabihf"
+	case isArm:
+		return "linux-gnueabihf"
+	case isStatic:
+		return "linux-musl"
+	default:
+		return "linux-gnu"
 	}
-	return fallback
 }

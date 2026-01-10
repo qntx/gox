@@ -8,32 +8,41 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/qntx/gox/internal/archive"
 )
 
 const (
-	dirPerm   = 0755
+	dirPerm   = 0o755
 	exeSuffix = ".exe"
 )
 
+// Builder executes cross-compilation builds using Zig as the C toolchain.
 type Builder struct {
 	zigPath string
 	opts    *Options
 }
 
+// New creates a Builder with the given Zig installation path and options.
 func New(zigPath string, opts *Options) *Builder {
 	return &Builder{zigPath: zigPath, opts: opts}
 }
 
+// Run executes the build for the specified Go packages.
 func (b *Builder) Run(ctx context.Context, packages []string) error {
+	if err := b.ensurePackages(ctx); err != nil {
+		return fmt.Errorf("ensure packages: %w", err)
+	}
+
 	if err := b.ensureOutputDir(); err != nil {
-		return fmt.Errorf("create output directory: %w", err)
+		return fmt.Errorf("create output dir: %w", err)
 	}
 
 	env := b.buildEnv()
 	args := b.buildArgs(packages)
 
 	if b.opts.Verbose {
-		b.printVerbose(env, args)
+		b.logVerbose(env, args)
 	}
 
 	cmd := exec.CommandContext(ctx, "go", args...)
@@ -45,19 +54,22 @@ func (b *Builder) Run(ctx context.Context, packages []string) error {
 		return err
 	}
 
-	if !b.opts.Pack {
-		return nil
+	if b.opts.Pack {
+		return b.pack()
 	}
-	return b.createArchive()
+	return nil
 }
 
-func (b *Builder) createArchive() error {
-	src := cond(b.opts.Prefix != "", b.opts.Prefix, b.opts.Output)
+func (b *Builder) pack() error {
+	src := b.opts.Prefix
+	if src == "" {
+		src = b.opts.Output
+	}
 	if src == "" {
 		return fmt.Errorf("--pack requires --output or --prefix")
 	}
 
-	archivePath, err := archive(src, b.opts.GOOS, b.opts.GOARCH)
+	archivePath, err := archive.Create(src, b.opts.GOOS, b.opts.GOARCH)
 	if err != nil {
 		return fmt.Errorf("create archive: %w", err)
 	}
@@ -68,11 +80,27 @@ func (b *Builder) createArchive() error {
 	return nil
 }
 
-func (b *Builder) printVerbose(env, args []string) {
+func (b *Builder) logVerbose(env, args []string) {
 	if output := b.resolveOutput(); output != "" {
 		fmt.Fprintf(os.Stderr, "output: %s\n", output)
 	}
 	fmt.Fprintf(os.Stderr, "env: %v\ngo %s\n", env, strings.Join(args, " "))
+}
+
+func (b *Builder) ensurePackages(ctx context.Context) error {
+	if len(b.opts.Packages) == 0 {
+		return nil
+	}
+
+	pkgs, err := EnsurePackages(ctx, b.opts.Packages)
+	if err != nil {
+		return err
+	}
+
+	inc, lib := CollectPackagePaths(pkgs)
+	b.opts.IncludeDirs = append(inc, b.opts.IncludeDirs...)
+	b.opts.LibDirs = append(lib, b.opts.LibDirs...)
+	return nil
 }
 
 func (b *Builder) ensureOutputDir() error {
@@ -83,12 +111,15 @@ func (b *Builder) ensureOutputDir() error {
 
 	if dir := filepath.Dir(output); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, dirPerm); err != nil {
-			return err
+			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 	}
 
 	if b.opts.Prefix != "" {
-		return os.MkdirAll(filepath.Join(b.opts.Prefix, "lib"), dirPerm)
+		libDir := filepath.Join(b.opts.Prefix, "lib")
+		if err := os.MkdirAll(libDir, dirPerm); err != nil {
+			return fmt.Errorf("mkdir %s: %w", libDir, err)
+		}
 	}
 	return nil
 }
@@ -102,45 +133,47 @@ func (b *Builder) buildEnv() []string {
 		"CC=" + b.zigCmd("cc", target),
 		"CXX=" + b.zigCmd("c++", target),
 	}
-	if v := b.cgoCflags(); v != "" {
-		env = append(env, "CGO_CFLAGS="+v)
+
+	if cflags := b.cgoCflags(); cflags != "" {
+		env = append(env, "CGO_CFLAGS="+cflags)
 	}
-	if v := b.cgoLdflags(); v != "" {
-		env = append(env, "CGO_LDFLAGS="+v)
+	if ldflags := b.cgoLdflags(); ldflags != "" {
+		env = append(env, "CGO_LDFLAGS="+ldflags)
 	}
 	return env
 }
 
 func (b *Builder) cgoCflags() string {
-	return prefixJoin("-I", b.opts.IncludeDirs)
+	return joinPrefixed("-I", b.opts.IncludeDirs)
 }
 
 func (b *Builder) cgoLdflags() string {
-	var flags []string
-	flags = appendPrefixed(flags, "-L", b.opts.LibDirs)
-	flags = appendPrefixed(flags, "-l", b.opts.Libs)
+	var parts []string
+	parts = appendPrefixed(parts, "-L", b.opts.LibDirs)
+	parts = appendPrefixed(parts, "-l", b.opts.Libs)
 
-	if b.opts.LinkMode == LinkModeStatic {
-		flags = append(flags, "-static")
+	if b.opts.LinkMode.IsStatic() {
+		parts = append(parts, "-static")
 	}
-	if b.shouldAddRpath() {
-		flags = append(flags, b.rpathFlag())
+	if rpath := b.rpathFlag(); rpath != "" {
+		parts = append(parts, rpath)
 	}
-	return strings.Join(flags, " ")
-}
-
-func (b *Builder) shouldAddRpath() bool {
-	return b.opts.Prefix != "" && !b.opts.NoRpath && b.opts.LinkMode != LinkModeStatic
+	return strings.Join(parts, " ")
 }
 
 func (b *Builder) rpathFlag() string {
+	if b.opts.Prefix == "" || b.opts.NoRpath || b.opts.LinkMode.IsStatic() {
+		return ""
+	}
+
 	switch b.opts.GOOS {
 	case "linux", "freebsd", "netbsd":
 		return "-Wl,-rpath,$ORIGIN/../lib"
 	case "darwin":
 		return "-Wl,-rpath,@executable_path/../lib"
+	default:
+		return ""
 	}
-	return ""
 }
 
 func (b *Builder) buildArgs(packages []string) []string {
@@ -149,7 +182,6 @@ func (b *Builder) buildArgs(packages []string) []string {
 	if output := b.resolveOutput(); output != "" {
 		args = append(args, "-o", output)
 	}
-
 	if ldflags := b.ldflags(); ldflags != "" {
 		args = append(args, "-ldflags="+ldflags)
 	}
@@ -165,6 +197,7 @@ func (b *Builder) buildArgs(packages []string) []string {
 func (b *Builder) ldflags() string {
 	var flags []string
 
+	// Cross-compiling to darwin requires -w to avoid dsymutil issues
 	if b.opts.GOOS == "darwin" && runtime.GOOS != "darwin" {
 		flags = append(flags, "-w")
 	}
@@ -187,22 +220,22 @@ func (b *Builder) resolveOutput() string {
 		return ""
 	}
 
-	exeName := filepath.Base(b.opts.Prefix)
+	name := filepath.Base(b.opts.Prefix)
 	if b.opts.GOOS == "windows" {
-		exeName += exeSuffix
+		name += exeSuffix
 	}
-	return filepath.Join(b.opts.Prefix, "bin", exeName)
+	return filepath.Join(b.opts.Prefix, "bin", name)
 }
 
 func (b *Builder) zigCmd(compiler, target string) string {
-	zigBin := filepath.Join(b.zigPath, "zig")
+	bin := filepath.Join(b.zigPath, "zig")
 	if runtime.GOOS == "windows" {
-		zigBin += exeSuffix
+		bin += exeSuffix
 	}
-	return fmt.Sprintf("%s %s -target %s", zigBin, compiler, target)
+	return fmt.Sprintf("%s %s -target %s", bin, compiler, target)
 }
 
-func prefixJoin(prefix string, items []string) string {
+func joinPrefixed(prefix string, items []string) string {
 	if len(items) == 0 {
 		return ""
 	}
@@ -218,11 +251,4 @@ func appendPrefixed(dst []string, prefix string, items []string) []string {
 		dst = append(dst, prefix+item)
 	}
 	return dst
-}
-
-func cond(ok bool, a, b string) string {
-	if ok {
-		return a
-	}
-	return b
 }

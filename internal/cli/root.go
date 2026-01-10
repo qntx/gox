@@ -1,8 +1,6 @@
 package cli
 
-import (
-	"github.com/spf13/cobra"
-)
+import "github.com/spf13/cobra"
 
 var rootCmd = &cobra.Command{
 	Use:   "gox",
@@ -13,10 +11,7 @@ Update gox:  go install github.com/qntx/gox/cmd/gox@latest
 Update zig:  gox zig update`,
 }
 
+// Execute runs the root command.
 func Execute() error {
 	return rootCmd.Execute()
-}
-
-func init() {
-	rootCmd.AddCommand(buildCmd)
 }

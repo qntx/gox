@@ -3,12 +3,13 @@ package cli
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 
 	"github.com/qntx/gox/internal/zig"
 	"github.com/spf13/cobra"
 )
+
+const defaultZigVersion = "master"
 
 var zigCmd = &cobra.Command{
 	Use:   "zig",
@@ -47,7 +48,7 @@ func init() {
 }
 
 func runZigUpdate(cmd *cobra.Command, args []string) error {
-	version := firstOr(args, "master")
+	version := argOr(args, 0, defaultZigVersion)
 	force, _ := cmd.Flags().GetBool("force")
 
 	if force {
@@ -70,6 +71,7 @@ func runZigList(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+
 	if len(versions) == 0 {
 		fmt.Println("No Zig versions installed.")
 		return nil
@@ -85,45 +87,47 @@ func runZigList(_ *cobra.Command, _ []string) error {
 
 func runZigClean(_ *cobra.Command, args []string) error {
 	if len(args) > 0 {
-		return cleanVersion(args[0])
+		return removeVersion(args[0])
 	}
-	return cleanAll()
+	return removeAll()
 }
 
-func cleanVersion(version string) error {
+func removeVersion(version string) error {
 	err := zig.Remove(version)
-	if os.IsNotExist(err) {
+	switch {
+	case os.IsNotExist(err):
 		fmt.Printf("zig %s not installed\n", version)
 		return nil
+	case err != nil:
+		return fmt.Errorf("remove %s: %w", version, err)
+	default:
+		fmt.Printf("removed zig %s\n", version)
+		return nil
 	}
-	if err != nil {
-		return err
-	}
-	fmt.Printf("removed zig %s\n", version)
-	return nil
 }
 
-func cleanAll() error {
+func removeAll() error {
 	versions, err := zig.Installed()
 	if err != nil {
 		return err
 	}
+
 	if len(versions) == 0 {
 		fmt.Println("No Zig versions to clean.")
 		return nil
 	}
 
-	cacheDir := filepath.Dir(zig.Path(versions[0]))
-	if err := os.RemoveAll(cacheDir); err != nil {
-		return err
+	if err := zig.RemoveAll(); err != nil {
+		return fmt.Errorf("remove all: %w", err)
 	}
+
 	fmt.Printf("removed %d version(s)\n", len(versions))
 	return nil
 }
 
-func firstOr(args []string, def string) string {
-	if len(args) > 0 {
-		return args[0]
+func argOr(args []string, idx int, def string) string {
+	if idx < len(args) {
+		return args[idx]
 	}
 	return def
 }
