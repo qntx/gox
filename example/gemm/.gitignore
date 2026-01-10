@@ -1,0 +1,7 @@
+*.exe
+*.exe~
+*.dll
+*.so.12
+
+/lib
+gemm
