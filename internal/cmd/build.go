@@ -22,6 +22,8 @@ var buildCmd = &cobra.Command{
 func init() {
 	f := buildCmd.Flags()
 	f.StringVarP(&buildOpts.Output, "output", "o", "", "output file path")
+	f.StringVar(&buildOpts.Prefix, "prefix", "", "output prefix directory (creates bin/lib structure)")
+	f.BoolVar(&buildOpts.NoRpath, "no-rpath", false, "disable rpath when using --prefix")
 	f.StringVar(&buildOpts.GOOS, "os", "", "target operating system")
 	f.StringVar(&buildOpts.GOARCH, "arch", "", "target architecture")
 	f.StringVar(&buildOpts.ZigVersion, "zig-version", "", "zig compiler version")
@@ -42,6 +44,8 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		}
 		buildOpts = opts
 	}
+
+	buildOpts.Normalize()
 
 	if err := buildOpts.Validate(); err != nil {
 		return err
