@@ -3,6 +3,7 @@ package build
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,77 +13,59 @@ import (
 	"github.com/qntx/gox/internal/archive"
 )
 
-const (
-	dirPerm   = 0o755
-	exeSuffix = ".exe"
-)
+const defaultPerm = 0o755
 
-// Builder executes cross-compilation builds using Zig as the C toolchain.
+// Builder orchestrates cross-compilation using Zig as the C/C++ toolchain.
 type Builder struct {
 	zigPath string
 	opts    *Options
 }
 
-// New creates a Builder with the given Zig installation path and options.
+// New creates a Builder with the specified Zig path and build options.
 func New(zigPath string, opts *Options) *Builder {
 	return &Builder{zigPath: zigPath, opts: opts}
 }
 
-// Run executes the build for the specified Go packages.
+// Run executes the complete build pipeline: packages → build → libs → pack.
 func (b *Builder) Run(ctx context.Context, packages []string) error {
 	if err := b.ensurePackages(ctx); err != nil {
-		return fmt.Errorf("ensure packages: %w", err)
+		return fmt.Errorf("packages: %w", err)
 	}
-
 	if err := b.ensureOutputDir(); err != nil {
-		return fmt.Errorf("create output dir: %w", err)
+		return fmt.Errorf("output dir: %w", err)
 	}
 
+	if err := b.execBuild(ctx, packages); err != nil {
+		return err
+	}
+
+	if err := b.copyLibs(); err != nil {
+		return fmt.Errorf("copy libs: %w", err)
+	}
+	if b.opts.Pack {
+		return b.createArchive()
+	}
+	return nil
+}
+
+// execBuild runs the go build command with configured environment.
+func (b *Builder) execBuild(ctx context.Context, packages []string) error {
 	env := b.buildEnv()
 	args := b.buildArgs(packages)
 
 	if b.opts.Verbose {
-		b.logVerbose(env, args)
+		b.logBuild(env, args)
 	}
 
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Env = append(os.Environ(), env...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-
-	if b.opts.Pack {
-		return b.pack()
-	}
-	return nil
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
 }
 
-func (b *Builder) pack() error {
-	src := b.opts.Prefix
-	if src == "" {
-		src = b.opts.Output
-	}
-	if src == "" {
-		return fmt.Errorf("--pack requires --output or --prefix")
-	}
-
-	archivePath, err := archive.Create(src, b.opts.GOOS, b.opts.GOARCH)
-	if err != nil {
-		return fmt.Errorf("create archive: %w", err)
-	}
-
-	if b.opts.Verbose {
-		fmt.Fprintf(os.Stderr, "archive: %s\n", archivePath)
-	}
-	return nil
-}
-
-func (b *Builder) logVerbose(env, args []string) {
-	if output := b.resolveOutput(); output != "" {
-		fmt.Fprintf(os.Stderr, "output: %s\n", output)
+func (b *Builder) logBuild(env, args []string) {
+	if out := b.outputPath(); out != "" {
+		fmt.Fprintf(os.Stderr, "output: %s\n", out)
 	}
 	fmt.Fprintf(os.Stderr, "env: %v\ngo %s\n", env, strings.Join(args, " "))
 }
@@ -91,12 +74,10 @@ func (b *Builder) ensurePackages(ctx context.Context) error {
 	if len(b.opts.Packages) == 0 {
 		return nil
 	}
-
 	pkgs, err := EnsurePackages(ctx, b.opts.Packages)
 	if err != nil {
 		return err
 	}
-
 	inc, lib := CollectPackagePaths(pkgs)
 	b.opts.IncludeDirs = append(inc, b.opts.IncludeDirs...)
 	b.opts.LibDirs = append(lib, b.opts.LibDirs...)
@@ -104,22 +85,17 @@ func (b *Builder) ensurePackages(ctx context.Context) error {
 }
 
 func (b *Builder) ensureOutputDir() error {
-	output := b.resolveOutput()
-	if output == "" {
+	out := b.outputPath()
+	if out == "" {
 		return nil
 	}
-
-	if dir := filepath.Dir(output); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, dirPerm); err != nil {
-			return fmt.Errorf("mkdir %s: %w", dir, err)
+	if dir := filepath.Dir(out); dir != "." {
+		if err := os.MkdirAll(dir, defaultPerm); err != nil {
+			return err
 		}
 	}
-
 	if b.opts.Prefix != "" {
-		libDir := filepath.Join(b.opts.Prefix, "lib")
-		if err := os.MkdirAll(libDir, dirPerm); err != nil {
-			return fmt.Errorf("mkdir %s: %w", libDir, err)
-		}
+		return os.MkdirAll(filepath.Join(b.opts.Prefix, "lib"), defaultPerm)
 	}
 	return nil
 }
@@ -130,11 +106,10 @@ func (b *Builder) buildEnv() []string {
 		"CGO_ENABLED=1",
 		"GOOS=" + b.opts.GOOS,
 		"GOARCH=" + b.opts.GOARCH,
-		"CC=" + b.zigCmd("cc", target),
-		"CXX=" + b.zigCmd("c++", target),
+		"CC=" + b.zigCC("cc", target),
+		"CXX=" + b.zigCC("c++", target),
 	}
-
-	if cflags := b.cgoCflags(); cflags != "" {
+	if cflags := b.cgoFlags("-I", b.opts.IncludeDirs); cflags != "" {
 		env = append(env, "CGO_CFLAGS="+cflags)
 	}
 	if ldflags := b.cgoLdflags(); ldflags != "" {
@@ -143,15 +118,14 @@ func (b *Builder) buildEnv() []string {
 	return env
 }
 
-func (b *Builder) cgoCflags() string {
-	return joinPrefixed("-I", b.opts.IncludeDirs)
-}
-
 func (b *Builder) cgoLdflags() string {
 	var parts []string
-	parts = appendPrefixed(parts, "-L", b.opts.LibDirs)
-	parts = appendPrefixed(parts, "-l", b.opts.Libs)
-
+	for _, dir := range b.opts.LibDirs {
+		parts = append(parts, "-L"+dir)
+	}
+	for _, lib := range b.opts.Libs {
+		parts = append(parts, "-l"+lib)
+	}
 	if b.opts.LinkMode.IsStatic() {
 		parts = append(parts, "-static")
 	}
@@ -161,81 +135,7 @@ func (b *Builder) cgoLdflags() string {
 	return strings.Join(parts, " ")
 }
 
-func (b *Builder) rpathFlag() string {
-	if b.opts.Prefix == "" || b.opts.NoRpath || b.opts.LinkMode.IsStatic() {
-		return ""
-	}
-
-	switch b.opts.GOOS {
-	case "linux", "freebsd", "netbsd":
-		return "-Wl,-rpath,$ORIGIN/../lib"
-	case "darwin":
-		return "-Wl,-rpath,@executable_path/../lib"
-	default:
-		return ""
-	}
-}
-
-func (b *Builder) buildArgs(packages []string) []string {
-	args := []string{"build"}
-
-	if output := b.resolveOutput(); output != "" {
-		args = append(args, "-o", output)
-	}
-	if ldflags := b.ldflags(); ldflags != "" {
-		args = append(args, "-ldflags="+ldflags)
-	}
-
-	args = append(args, b.opts.BuildFlags...)
-
-	if len(packages) > 0 {
-		return append(args, packages...)
-	}
-	return append(args, ".")
-}
-
-func (b *Builder) ldflags() string {
-	var flags []string
-
-	// Cross-compiling to darwin requires -w to avoid dsymutil issues
-	if b.opts.GOOS == "darwin" && runtime.GOOS != "darwin" {
-		flags = append(flags, "-w")
-	}
-
-	switch b.opts.LinkMode {
-	case LinkModeStatic:
-		flags = append(flags, "-linkmode=external", `-extldflags "-static"`)
-	case LinkModeDynamic:
-		flags = append(flags, "-linkmode=external")
-	}
-
-	return strings.Join(flags, " ")
-}
-
-func (b *Builder) resolveOutput() string {
-	if b.opts.Output != "" {
-		return b.opts.Output
-	}
-	if b.opts.Prefix == "" {
-		return ""
-	}
-
-	name := filepath.Base(b.opts.Prefix)
-	if b.opts.GOOS == "windows" {
-		name += exeSuffix
-	}
-	return filepath.Join(b.opts.Prefix, "bin", name)
-}
-
-func (b *Builder) zigCmd(compiler, target string) string {
-	bin := filepath.Join(b.zigPath, "zig")
-	if runtime.GOOS == "windows" {
-		bin += exeSuffix
-	}
-	return fmt.Sprintf("%s %s -target %s", bin, compiler, target)
-}
-
-func joinPrefixed(prefix string, items []string) string {
+func (b *Builder) cgoFlags(prefix string, items []string) string {
 	if len(items) == 0 {
 		return ""
 	}
@@ -246,9 +146,173 @@ func joinPrefixed(prefix string, items []string) string {
 	return strings.Join(parts, " ")
 }
 
-func appendPrefixed(dst []string, prefix string, items []string) []string {
-	for _, item := range items {
-		dst = append(dst, prefix+item)
+func (b *Builder) rpathFlag() string {
+	if b.opts.Prefix == "" || b.opts.NoRpath || b.opts.LinkMode.IsStatic() {
+		return ""
 	}
-	return dst
+	switch b.opts.GOOS {
+	case "linux", "freebsd", "netbsd":
+		return "-Wl,-rpath,$ORIGIN/../lib"
+	case "darwin":
+		return "-Wl,-rpath,@executable_path/../lib"
+	}
+	return ""
+}
+
+func (b *Builder) buildArgs(packages []string) []string {
+	args := []string{"build"}
+	if out := b.outputPath(); out != "" {
+		args = append(args, "-o", out)
+	}
+	if ldflags := b.goLdflags(); ldflags != "" {
+		args = append(args, "-ldflags="+ldflags)
+	}
+	args = append(args, b.opts.BuildFlags...)
+	if len(packages) == 0 {
+		return append(args, ".")
+	}
+	return append(args, packages...)
+}
+
+func (b *Builder) goLdflags() string {
+	var flags []string
+	// Cross-compiling to darwin requires -w to avoid dsymutil issues
+	if b.opts.GOOS == "darwin" && runtime.GOOS != "darwin" {
+		flags = append(flags, "-w")
+	}
+	switch b.opts.LinkMode {
+	case LinkModeStatic:
+		flags = append(flags, "-linkmode=external", `-extldflags "-static"`)
+	case LinkModeDynamic:
+		flags = append(flags, "-linkmode=external")
+	}
+	return strings.Join(flags, " ")
+}
+
+func (b *Builder) outputPath() string {
+	if b.opts.Output != "" {
+		return b.opts.Output
+	}
+	if b.opts.Prefix == "" {
+		return ""
+	}
+	name := filepath.Base(b.opts.Prefix)
+	if b.opts.GOOS == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(b.opts.Prefix, "bin", name)
+}
+
+func (b *Builder) zigCC(mode, target string) string {
+	zig := filepath.Join(b.zigPath, "zig")
+	if runtime.GOOS == "windows" {
+		zig += ".exe"
+	}
+	return fmt.Sprintf("%s %s -target %s", zig, mode, target)
+}
+
+func (b *Builder) copyLibs() error {
+	if b.opts.Prefix == "" || b.opts.LinkMode.IsStatic() || len(b.opts.LibDirs) == 0 {
+		return nil
+	}
+	dest := filepath.Join(b.opts.Prefix, "lib")
+	for _, src := range b.opts.LibDirs {
+		if err := copyDir(src, dest); err != nil {
+			return fmt.Errorf("%s: %w", src, err)
+		}
+	}
+	if b.opts.Verbose {
+		fmt.Fprintf(os.Stderr, "libs: %s\n", dest)
+	}
+	return nil
+}
+
+func (b *Builder) createArchive() error {
+	src := b.opts.Prefix
+	if src == "" {
+		src = b.opts.Output
+	}
+	if src == "" {
+		return fmt.Errorf("--pack requires --output or --prefix")
+	}
+	path, err := archive.Create(src, b.opts.GOOS, b.opts.GOARCH)
+	if err != nil {
+		return fmt.Errorf("archive: %w", err)
+	}
+	if b.opts.Verbose {
+		fmt.Fprintf(os.Stderr, "archive: %s\n", path)
+	}
+	return nil
+}
+
+// copyDir copies all files (not subdirs) from src to dst.
+// Preserves symlinks on Unix; resolves them on Windows.
+func copyDir(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		srcPath := filepath.Join(src, e.Name())
+		dstPath := filepath.Join(dst, e.Name())
+
+		info, err := e.Info()
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			err = copySymlink(srcPath, dstPath)
+		} else {
+			err = copyFile(srcPath, dstPath, info.Mode())
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copySymlink(src, dst string) error {
+	target, err := os.Readlink(src)
+	if err != nil {
+		return copyFile(src, dst, 0) // fallback: not a symlink
+	}
+	_ = os.Remove(dst)
+	if os.Symlink(target, dst) == nil {
+		return nil
+	}
+	// Windows fallback: copy resolved target
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(src), target)
+	}
+	return copyFile(target, dst, 0)
+}
+
+func copyFile(src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	if mode == 0 {
+		if fi, err := in.Stat(); err == nil {
+			mode = fi.Mode()
+		} else {
+			mode = 0o644
+		}
+	}
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, in)
+	if closeErr := out.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
