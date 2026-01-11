@@ -7,10 +7,6 @@ import (
 	"runtime"
 )
 
-// ----------------------------------------------------------------------------
-// Types
-// ----------------------------------------------------------------------------
-
 // LinkMode specifies binary linking strategy.
 type LinkMode string
 
@@ -33,19 +29,11 @@ type Options struct {
 	Verbose     bool
 }
 
-// ----------------------------------------------------------------------------
-// Constants
-// ----------------------------------------------------------------------------
-
 const (
 	LinkAuto    LinkMode = "auto"
 	LinkStatic  LinkMode = "static"
 	LinkDynamic LinkMode = "dynamic"
 )
-
-// ----------------------------------------------------------------------------
-// Zig Target Mappings
-// ----------------------------------------------------------------------------
 
 var (
 	zigArch = map[string]string{
@@ -67,10 +55,6 @@ var (
 	}
 )
 
-// ----------------------------------------------------------------------------
-// LinkMode Methods
-// ----------------------------------------------------------------------------
-
 func (m LinkMode) Valid() bool {
 	return m == LinkAuto || m == LinkStatic || m == LinkDynamic
 }
@@ -78,10 +62,6 @@ func (m LinkMode) Valid() bool {
 func (m LinkMode) IsStatic() bool {
 	return m == LinkStatic
 }
-
-// ----------------------------------------------------------------------------
-// Options Methods
-// ----------------------------------------------------------------------------
 
 // Normalize applies defaults for unset fields.
 func (o *Options) Normalize() {

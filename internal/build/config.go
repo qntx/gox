@@ -9,10 +9,6 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// ----------------------------------------------------------------------------
-// Types
-// ----------------------------------------------------------------------------
-
 // Config represents gox.toml structure.
 type Config struct {
 	Default ConfigDefault  `toml:"default"`
@@ -50,17 +46,9 @@ type ConfigTarget struct {
 	Verbose    bool     `toml:"verbose"`
 }
 
-// ----------------------------------------------------------------------------
-// Constants & Errors
-// ----------------------------------------------------------------------------
-
 const ConfigFile = "gox.toml"
 
 var ErrConfigNotFound = errors.New("config not found")
-
-// ----------------------------------------------------------------------------
-// Public Functions
-// ----------------------------------------------------------------------------
 
 // LoadConfig loads config from path or searches upward from cwd.
 func LoadConfig(path string) (*Config, error) {
@@ -80,10 +68,6 @@ func LoadConfig(path string) (*Config, error) {
 	var cfg Config
 	return &cfg, toml.Unmarshal(data, &cfg)
 }
-
-// ----------------------------------------------------------------------------
-// Config Methods
-// ----------------------------------------------------------------------------
 
 // ToOptions converts targets to Options slice.
 func (c *Config) ToOptions(names []string) ([]*Options, error) {
@@ -166,10 +150,6 @@ func (c *Config) mergeOptions(t *ConfigTarget) *Options {
 		Verbose:     d.Verbose || t.Verbose,
 	}
 }
-
-// ----------------------------------------------------------------------------
-// Helpers
-// ----------------------------------------------------------------------------
 
 func findConfig() string {
 	cwd, err := os.Getwd()

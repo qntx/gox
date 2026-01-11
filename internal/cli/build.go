@@ -14,10 +14,6 @@ import (
 	"github.com/qntx/gox/internal/zig"
 )
 
-// ----------------------------------------------------------------------------
-// Types & Variables
-// ----------------------------------------------------------------------------
-
 type buildFlags struct {
 	config   string
 	targets  []string
@@ -65,10 +61,6 @@ func init() {
 
 	rootCmd.AddCommand(buildCmd)
 }
-
-// ----------------------------------------------------------------------------
-// Command Handlers
-// ----------------------------------------------------------------------------
 
 func runBuild(cmd *cobra.Command, args []string) error {
 	opts, err := loadBuildOptions(cmd)
@@ -143,10 +135,6 @@ func runParallel(cmd *cobra.Command, args []string, opts []*build.Options) error
 	return fmt.Errorf("%d targets failed", len(errs))
 }
 
-// ----------------------------------------------------------------------------
-// Build Execution
-// ----------------------------------------------------------------------------
-
 func executeBuild(cmd *cobra.Command, args []string, opts *build.Options, idx, total int) error {
 	opts.Normalize()
 	if err := opts.Validate(); err != nil {
@@ -179,10 +167,6 @@ func executeBuildBuffered(cmd *cobra.Command, args []string, opts *build.Options
 
 	return build.NewWithOutput(zigPath, opts, buf, buf).Run(cmd.Context(), args)
 }
-
-// ----------------------------------------------------------------------------
-// Options Loading
-// ----------------------------------------------------------------------------
 
 func loadBuildOptions(cmd *cobra.Command) ([]*build.Options, error) {
 	cfg, err := build.LoadConfig(flags.config)

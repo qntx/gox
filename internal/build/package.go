@@ -17,10 +17,6 @@ import (
 	"github.com/qntx/gox/internal/ui"
 )
 
-// ----------------------------------------------------------------------------
-// Types
-// ----------------------------------------------------------------------------
-
 // Package represents a dependency archive with include/lib/bin directories.
 type Package struct {
 	Source  string
@@ -40,18 +36,10 @@ type CacheEntry struct {
 	LibCount     int
 }
 
-// ----------------------------------------------------------------------------
-// Package Patterns
-// ----------------------------------------------------------------------------
-
 var (
 	ghReleaseRE = regexp.MustCompile(`^([^/]+)/([^@]+)@([^/]+)/(.+)$`)
 	archiveExts = []string{".tar.gz", ".tgz", ".tar.xz", ".txz", ".zip"}
 )
-
-// ----------------------------------------------------------------------------
-// Public Functions
-// ----------------------------------------------------------------------------
 
 // EnsureAll parses and downloads packages in parallel with progress.
 func EnsureAll(ctx context.Context, sources []string) ([]*Package, error) {
@@ -175,10 +163,6 @@ func CacheDir() string {
 	return cacheDir()
 }
 
-// ----------------------------------------------------------------------------
-// Package Methods
-// ----------------------------------------------------------------------------
-
 func (p *Package) resolvePaths() {
 	dir := filepath.Join(cacheDir(), p.Dir)
 	p.Include = filepath.Join(dir, "include")
@@ -214,10 +198,6 @@ func (p *Package) download(ctx context.Context, bar *ui.Bar) error {
 	}
 	return nil
 }
-
-// ----------------------------------------------------------------------------
-// Helpers
-// ----------------------------------------------------------------------------
 
 func parsePackage(source string) (*Package, error) {
 	p := &Package{Source: source}

@@ -15,10 +15,6 @@ import (
 	"github.com/qntx/gox/internal/ui"
 )
 
-// ----------------------------------------------------------------------------
-// Types
-// ----------------------------------------------------------------------------
-
 // Builder orchestrates cross-compilation using Zig as the C toolchain.
 type Builder struct {
 	zig    string
@@ -26,10 +22,6 @@ type Builder struct {
 	stdout io.Writer
 	stderr io.Writer
 }
-
-// ----------------------------------------------------------------------------
-// Constructors
-// ----------------------------------------------------------------------------
 
 // New creates a Builder with default stdout/stderr.
 func New(zigPath string, opts *Options) *Builder {
@@ -40,10 +32,6 @@ func New(zigPath string, opts *Options) *Builder {
 func NewWithOutput(zigPath string, opts *Options, stdout, stderr io.Writer) *Builder {
 	return &Builder{zig: zigPath, opts: opts, stdout: stdout, stderr: stderr}
 }
-
-// ----------------------------------------------------------------------------
-// Builder Methods
-// ----------------------------------------------------------------------------
 
 // Run executes the full build pipeline.
 func (b *Builder) Run(ctx context.Context, pkgs []string) error {
@@ -174,10 +162,6 @@ func (b *Builder) createArchive() error {
 	return nil
 }
 
-// ----------------------------------------------------------------------------
-// Build Environment
-// ----------------------------------------------------------------------------
-
 func (b *Builder) buildEnv() []string {
 	target := b.opts.ZigTarget()
 	env := []string{
@@ -291,10 +275,6 @@ func (b *Builder) logBuild(env, args []string) {
 	}
 	fmt.Fprintf(os.Stderr, "env: %v\ngo %s\n", env, strings.Join(args, " "))
 }
-
-// ----------------------------------------------------------------------------
-// File Operations
-// ----------------------------------------------------------------------------
 
 func copyDir(src, dst string) error {
 	entries, err := os.ReadDir(src)

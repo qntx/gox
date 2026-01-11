@@ -9,10 +9,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// ----------------------------------------------------------------------------
-// Colors
-// ----------------------------------------------------------------------------
-
 var (
 	colorPrimary = lipgloss.Color("#7C3AED")
 	colorSuccess = lipgloss.Color("#10B981")
@@ -23,10 +19,6 @@ var (
 	colorSubtle  = lipgloss.Color("#9CA3AF")
 	colorText    = lipgloss.Color("#F9FAFB")
 )
-
-// ----------------------------------------------------------------------------
-// Styles
-// ----------------------------------------------------------------------------
 
 var (
 	styleSuccess = lipgloss.NewStyle().Foreground(colorSuccess).Bold(true)
@@ -41,10 +33,6 @@ var (
 	styleHeader  = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true).MarginBottom(1)
 )
 
-// ----------------------------------------------------------------------------
-// Icons
-// ----------------------------------------------------------------------------
-
 const (
 	iconSuccess = "✓"
 	iconError   = "✗"
@@ -53,10 +41,6 @@ const (
 	iconArrow   = "→"
 	iconBuild   = "⚙"
 )
-
-// ----------------------------------------------------------------------------
-// Status Messages
-// ----------------------------------------------------------------------------
 
 // Success prints a success message.
 func Success(msg string, args ...any) {
@@ -78,10 +62,6 @@ func Info(msg string, args ...any) {
 	fmt.Fprintf(os.Stderr, "%s %s\n", styleInfo.Render(iconInfo), fmt.Sprintf(msg, args...))
 }
 
-// ----------------------------------------------------------------------------
-// Output Helpers
-// ----------------------------------------------------------------------------
-
 // Header prints a section header.
 func Header(title string) {
 	fmt.Fprintf(os.Stderr, "\n%s\n", styleHeader.Render(title))
@@ -96,10 +76,6 @@ func Label(key, value string) {
 func Divider() {
 	fmt.Fprintf(os.Stderr, "%s\n", styleDim.Render(strings.Repeat("─", 50)))
 }
-
-// ----------------------------------------------------------------------------
-// Build Output
-// ----------------------------------------------------------------------------
 
 // Target prints a build target header.
 func Target(idx, total int, goos, goarch string) {
@@ -137,10 +113,6 @@ func Built(output string, duration time.Duration) {
 func BuildFailed() {
 	fmt.Fprintf(os.Stderr, "%s %s\n", styleError.Render(iconError), "Build failed")
 }
-
-// ----------------------------------------------------------------------------
-// Table
-// ----------------------------------------------------------------------------
 
 // Table renders a simple table.
 type Table struct {
@@ -204,10 +176,6 @@ func (t *Table) Render() {
 		fmt.Fprintf(os.Stderr, "  %s\n", sb.String())
 	}
 }
-
-// ----------------------------------------------------------------------------
-// Formatters
-// ----------------------------------------------------------------------------
 
 // FormatSize formats bytes as human readable string.
 func FormatSize(b int64) string {

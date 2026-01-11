@@ -14,10 +14,6 @@ import (
 	"github.com/qntx/gox/internal/ui"
 )
 
-// ----------------------------------------------------------------------------
-// Types
-// ----------------------------------------------------------------------------
-
 // Index maps version names to releases.
 type Index map[string]Release
 
@@ -35,18 +31,10 @@ type Build struct {
 	Size    string `json:"size"`
 }
 
-// ----------------------------------------------------------------------------
-// Constants
-// ----------------------------------------------------------------------------
-
 const (
 	indexURL       = "https://ziglang.org/download/index.json"
 	defaultVersion = "master"
 )
-
-// ----------------------------------------------------------------------------
-// Platform Mappings
-// ----------------------------------------------------------------------------
 
 var (
 	archMap = map[string]string{
@@ -67,10 +55,6 @@ var (
 		"version":   true,
 	}
 )
-
-// ----------------------------------------------------------------------------
-// Public Functions
-// ----------------------------------------------------------------------------
 
 // Ensure downloads and caches a Zig version. Returns installation path.
 func Ensure(ctx context.Context, version string) (string, error) {
@@ -150,10 +134,6 @@ func RemoveAll() error {
 	return os.RemoveAll(filepath.Join(baseDir(), "zig"))
 }
 
-// ----------------------------------------------------------------------------
-// Release Methods
-// ----------------------------------------------------------------------------
-
 func (r *Release) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -175,10 +155,6 @@ func (r *Release) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
-
-// ----------------------------------------------------------------------------
-// Helpers
-// ----------------------------------------------------------------------------
 
 func fetchIndex(ctx context.Context) (Index, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, indexURL, nil)
