@@ -129,6 +129,87 @@ func CollectPaths(pkgs []*Package) (inc, lib []string) {
 }
 
 // ----------------------------------------------------------------------------
+// Cache Management
+// ----------------------------------------------------------------------------
+
+// CachedPkg represents a cached package with metadata.
+type CachedPkg struct {
+	Name    string
+	Path    string
+	Size    int64
+	Include int // file count
+	Lib     int // file count
+}
+
+// ListCached returns all cached packages.
+func ListCached() ([]CachedPkg, error) {
+	root := pkgCache()
+	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var pkgs []CachedPkg
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		p := CachedPkg{
+			Name: e.Name(),
+			Path: filepath.Join(root, e.Name()),
+		}
+		p.Size = dirSize(p.Path)
+		p.Include = countFiles(filepath.Join(p.Path, "include"))
+		p.Lib = countFiles(filepath.Join(p.Path, "lib"))
+		pkgs = append(pkgs, p)
+	}
+	return pkgs, nil
+}
+
+// RemoveCached removes a cached package by name.
+func RemoveCached(name string) error {
+	return os.RemoveAll(filepath.Join(pkgCache(), name))
+}
+
+// RemoveAllCached removes all cached packages.
+func RemoveAllCached() error {
+	return os.RemoveAll(pkgCache())
+}
+
+// CacheDir returns the package cache directory path.
+func CacheDir() string {
+	return pkgCache()
+}
+
+func dirSize(path string) int64 {
+	var size int64
+	filepath.Walk(path, func(_ string, info os.FileInfo, _ error) error {
+		if info != nil && !info.IsDir() {
+			size += info.Size()
+		}
+		return nil
+	})
+	return size
+}
+
+func countFiles(path string) int {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, e := range entries {
+		if !e.IsDir() {
+			count++
+		}
+	}
+	return count
+}
+
+// ----------------------------------------------------------------------------
 // Internal
 // ----------------------------------------------------------------------------
 
