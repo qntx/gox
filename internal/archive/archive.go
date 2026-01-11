@@ -16,20 +16,12 @@ import (
 	"github.com/ulikunitz/xz"
 )
 
-// ----------------------------------------------------------------------------
-// Constants & Errors
-// ----------------------------------------------------------------------------
-
 const (
 	perm         = 0o755
 	maxLinkDepth = 10
 )
 
 var ErrPathTraversal = errors.New("path traversal")
-
-// ----------------------------------------------------------------------------
-// Format
-// ----------------------------------------------------------------------------
 
 // Format represents an archive format.
 type Format int
@@ -65,10 +57,6 @@ func ForOS(goos string) Format {
 	return TarGz
 }
 
-// ----------------------------------------------------------------------------
-// Public API
-// ----------------------------------------------------------------------------
-
 // Extract extracts archive to destDir, stripping top-level directory.
 func Extract(src, dst string) error {
 	switch Detect(src) {
@@ -81,13 +69,14 @@ func Extract(src, dst string) error {
 	}
 }
 
-// Download fetches URL, extracts to destDir.
+// Download fetches URL and extracts to dst.
 func Download(ctx context.Context, url, dst string) error {
-	return DownloadProgress(ctx, url, dst, os.Stderr)
+	return DownloadTo(ctx, url, dst, nil)
 }
 
-// DownloadProgress downloads with progress output.
-func DownloadProgress(ctx context.Context, url, dst string, w io.Writer) error {
+// DownloadTo downloads with optional progress writer.
+// If pw is nil, no progress is reported.
+func DownloadTo(ctx context.Context, url, dst string, pw io.Writer) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -110,18 +99,28 @@ func DownloadProgress(ctx context.Context, url, dst string, w io.Writer) error {
 	defer os.RemoveAll(tmp)
 
 	file := filepath.Join(tmp, "archive"+Detect(url).Ext())
-	if err := fetch(file, resp.Body, resp.ContentLength, w); err != nil {
+	if err := fetchTo(file, resp.Body, pw); err != nil {
 		return err
-	}
-
-	if w != nil {
-		fmt.Fprintln(w, "\nextracting...")
 	}
 
 	if err := os.MkdirAll(filepath.Dir(dst), perm); err != nil {
 		return err
 	}
 	return Extract(file, dst)
+}
+
+// ContentLength fetches the content length of a URL without downloading.
+func ContentLength(ctx context.Context, url string) (int64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	resp.Body.Close()
+	return resp.ContentLength, nil
 }
 
 // Create creates archive from src for OS/arch.
@@ -145,16 +144,8 @@ func Create(src, goos, goarch string) (string, error) {
 	return dst, err
 }
 
-// ----------------------------------------------------------------------------
-// Decompressors
-// ----------------------------------------------------------------------------
-
 func gzReader(r io.Reader) (io.Reader, error) { return gzip.NewReader(r) }
 func xzReader(r io.Reader) (io.Reader, error) { return xz.NewReader(r) }
-
-// ----------------------------------------------------------------------------
-// Zip Extraction
-// ----------------------------------------------------------------------------
 
 func unzip(src, dst string) error {
 	r, err := zip.OpenReader(src)
@@ -201,10 +192,6 @@ func unzipEntry(f *zip.File, dst, strip string) error {
 	defer rc.Close()
 	return write(p, rc, f.Mode())
 }
-
-// ----------------------------------------------------------------------------
-// Tar Extraction
-// ----------------------------------------------------------------------------
 
 func untar(src, dst string, decomp func(io.Reader) (io.Reader, error)) error {
 	f, err := os.Open(src)
@@ -323,10 +310,6 @@ func resolve(base, name string, m map[string]string) string {
 	}
 	return t
 }
-
-// ----------------------------------------------------------------------------
-// Archive Creation
-// ----------------------------------------------------------------------------
 
 func mktgz(src, dst string, isDir bool) error {
 	f, err := os.Create(dst)
@@ -473,10 +456,6 @@ func zipAdd(zw *zip.Writer, src, name string) error {
 	return copyTo(w, src)
 }
 
-// ----------------------------------------------------------------------------
-// File Utilities
-// ----------------------------------------------------------------------------
-
 func safe(dst, name string) (string, error) {
 	p := filepath.Join(dst, name)
 	if !strings.HasPrefix(p, filepath.Clean(dst)+string(os.PathSeparator)) {
@@ -525,34 +504,20 @@ func copyTo(w io.Writer, path string) error {
 	return err
 }
 
-func fetch(path string, r io.Reader, total int64, w io.Writer) error {
+func fetchTo(path string, r io.Reader, pw io.Writer) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 
-	src := io.Reader(r)
-	if w != nil && total > 0 {
-		src = &progress{r: r, total: total, w: w}
+	var dst io.Writer = f
+	if pw != nil {
+		dst = io.MultiWriter(f, pw)
 	}
 
-	_, err = io.Copy(f, src)
+	_, err = io.Copy(dst, r)
 	if e := f.Close(); err == nil {
 		err = e
 	}
 	return err
-}
-
-type progress struct {
-	r       io.Reader
-	w       io.Writer
-	total   int64
-	current int64
-}
-
-func (p *progress) Read(b []byte) (int, error) {
-	n, err := p.r.Read(b)
-	p.current += int64(n)
-	fmt.Fprintf(p.w, "\r%.1f%%", float64(p.current)/float64(p.total)*100)
-	return n, err
 }

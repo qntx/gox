@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -9,12 +10,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/qntx/gox/internal/build"
+	"github.com/qntx/gox/internal/ui"
 	"github.com/qntx/gox/internal/zig"
 )
-
-// ----------------------------------------------------------------------------
-// Types
-// ----------------------------------------------------------------------------
 
 type flags struct {
 	config   string
@@ -23,10 +21,6 @@ type flags struct {
 	parallel bool
 	opts     build.Options
 }
-
-// ----------------------------------------------------------------------------
-// Command
-// ----------------------------------------------------------------------------
 
 var (
 	bf = flags{}
@@ -80,10 +74,6 @@ func init() {
 	rootCmd.AddCommand(buildCmd)
 }
 
-// ----------------------------------------------------------------------------
-// Execution
-// ----------------------------------------------------------------------------
-
 func runBuild(cmd *cobra.Command, args []string) error {
 	opts, err := loadOptions(cmd)
 	if err != nil {
@@ -106,30 +96,50 @@ func buildSequential(cmd *cobra.Command, args []string, opts []*build.Options) e
 }
 
 func buildParallel(cmd *cobra.Command, args []string, opts []*build.Options) error {
-	var (
-		wg   sync.WaitGroup
-		mu   sync.Mutex
-		errs []error
-	)
+	ui.Info("Building %d targets in parallel...", len(opts))
 
-	for i, o := range opts {
+	type result struct {
+		target string
+		output string
+		err    error
+	}
+
+	results := make(chan result, len(opts))
+	var wg sync.WaitGroup
+
+	for _, o := range opts {
 		wg.Go(func() {
-			if err := doBuild(cmd, args, o, i, len(opts)); err != nil {
-				mu.Lock()
-				errs = append(errs, fmt.Errorf("%s/%s: %w", o.GOOS, o.GOARCH, err))
-				mu.Unlock()
-			}
+			var buf bytes.Buffer
+			target := fmt.Sprintf("%s/%s", o.GOOS, o.GOARCH)
+			err := doBuildBuffered(cmd, args, o, &buf)
+			results <- result{target: target, output: buf.String(), err: err}
 		})
 	}
-	wg.Wait()
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Print results as they complete
+	var errs []error
+	for r := range results {
+		if r.output != "" {
+			os.Stderr.WriteString(r.output)
+		}
+		if r.err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", r.target, r.err))
+		}
+	}
 
 	switch len(errs) {
 	case 0:
+		ui.Success("All %d targets built successfully", len(opts))
 		return nil
 	case 1:
 		return errs[0]
 	default:
-		return fmt.Errorf("%d targets failed: %v", len(errs), errs)
+		return fmt.Errorf("%d targets failed", len(errs))
 	}
 }
 
@@ -154,9 +164,19 @@ func doBuild(cmd *cobra.Command, args []string, opts *build.Options, idx, total 
 	return build.New(zigPath, opts).Run(cmd.Context(), args)
 }
 
-// ----------------------------------------------------------------------------
-// Options Resolution
-// ----------------------------------------------------------------------------
+func doBuildBuffered(cmd *cobra.Command, args []string, opts *build.Options, buf *bytes.Buffer) error {
+	opts.Normalize()
+	if err := opts.Validate(); err != nil {
+		return err
+	}
+
+	zigPath, err := zig.Ensure(cmd.Context(), opts.ZigVersion)
+	if err != nil {
+		return fmt.Errorf("zig: %w", err)
+	}
+
+	return build.NewWithOutput(zigPath, opts, buf, buf).Run(cmd.Context(), args)
+}
 
 func loadOptions(cmd *cobra.Command) ([]*build.Options, error) {
 	cfg, err := build.LoadConfig(bf.config)
@@ -207,10 +227,6 @@ func mergeFlags(cmd *cobra.Command, o *build.Options) {
 		o.LinkMode = build.LinkMode(bf.linkMode)
 	}
 }
-
-// ----------------------------------------------------------------------------
-// Helpers
-// ----------------------------------------------------------------------------
 
 type changedChecker interface{ Changed(string) bool }
 

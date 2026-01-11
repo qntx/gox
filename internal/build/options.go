@@ -7,10 +7,6 @@ import (
 	"runtime"
 )
 
-// ----------------------------------------------------------------------------
-// LinkMode
-// ----------------------------------------------------------------------------
-
 // LinkMode specifies binary linking strategy.
 type LinkMode string
 
@@ -25,10 +21,6 @@ func (m LinkMode) Valid() bool {
 }
 
 func (m LinkMode) IsStatic() bool { return m == LinkStatic }
-
-// ----------------------------------------------------------------------------
-// Options
-// ----------------------------------------------------------------------------
 
 // Options configures a build operation.
 type Options struct {
@@ -89,10 +81,6 @@ func (o *Options) Validate() error {
 	}
 	return nil
 }
-
-// ----------------------------------------------------------------------------
-// Zig Target
-// ----------------------------------------------------------------------------
 
 var (
 	zigArch = map[string]string{

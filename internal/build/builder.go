@@ -9,23 +9,28 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/qntx/gox/internal/archive"
+	"github.com/qntx/gox/internal/ui"
 )
-
-// ----------------------------------------------------------------------------
-// Builder
-// ----------------------------------------------------------------------------
 
 // Builder orchestrates cross-compilation using Zig.
 type Builder struct {
-	zig  string
-	opts *Options
+	zig    string
+	opts   *Options
+	stdout io.Writer
+	stderr io.Writer
 }
 
-// New creates a Builder.
+// New creates a Builder with stdout/stderr going to os.Stdout/os.Stderr.
 func New(zigPath string, opts *Options) *Builder {
-	return &Builder{zig: zigPath, opts: opts}
+	return &Builder{zig: zigPath, opts: opts, stdout: os.Stdout, stderr: os.Stderr}
+}
+
+// NewWithOutput creates a Builder with custom output writers.
+func NewWithOutput(zigPath string, opts *Options, stdout, stderr io.Writer) *Builder {
+	return &Builder{zig: zigPath, opts: opts, stdout: stdout, stderr: stderr}
 }
 
 // Run executes: packages → build → libs → pack.
@@ -47,10 +52,6 @@ func (b *Builder) Run(ctx context.Context, pkgs []string) error {
 	}
 	return nil
 }
-
-// ----------------------------------------------------------------------------
-// Build Pipeline
-// ----------------------------------------------------------------------------
 
 func (b *Builder) setupPackages(ctx context.Context) error {
 	if len(b.opts.Packages) == 0 {
@@ -86,14 +87,27 @@ func (b *Builder) build(ctx context.Context, pkgs []string) error {
 	env := b.env()
 	args := b.args(pkgs)
 
+	fmt.Fprintf(b.stderr, "%s Building %s/%s\n", ui.InfoPrefix(), b.opts.GOOS, b.opts.GOARCH)
 	if b.opts.Verbose {
 		b.log(env, args)
 	}
 
+	start := time.Now()
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Env = append(os.Environ(), env...)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	return cmd.Run()
+	cmd.Stdout, cmd.Stderr = b.stdout, b.stderr
+
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(b.stderr, "%s Build failed\n", ui.ErrorPrefix())
+		return err
+	}
+
+	if out := b.output(); out != "" {
+		fmt.Fprintf(b.stderr, "%s Built %s in %s\n", ui.SuccessPrefix(), out, ui.FormatDuration(time.Since(start)))
+	} else {
+		fmt.Fprintf(b.stderr, "%s Built in %s\n", ui.SuccessPrefix(), ui.FormatDuration(time.Since(start)))
+	}
+	return nil
 }
 
 func (b *Builder) copyLibs() error {
@@ -129,10 +143,6 @@ func (b *Builder) pack() error {
 	}
 	return nil
 }
-
-// ----------------------------------------------------------------------------
-// Environment & Arguments
-// ----------------------------------------------------------------------------
 
 func (b *Builder) env() []string {
 	tgt := b.opts.ZigTarget()
@@ -176,7 +186,13 @@ func (b *Builder) cc(mode, target string) string {
 }
 
 func (b *Builder) cflags() string {
-	return joinFlags("-I", b.opts.IncludeDirs)
+	var p []string
+	// Suppress known harmless warnings
+	p = append(p, "-Wno-macro-redefined")
+	for _, d := range b.opts.IncludeDirs {
+		p = append(p, "-I"+d)
+	}
+	return strings.Join(p, " ")
 }
 
 func (b *Builder) ldflags() string {
@@ -242,21 +258,6 @@ func (b *Builder) log(env, args []string) {
 		fmt.Fprintf(os.Stderr, "out: %s\n", out)
 	}
 	fmt.Fprintf(os.Stderr, "env: %v\ngo %s\n", env, strings.Join(args, " "))
-}
-
-// ----------------------------------------------------------------------------
-// File Utilities
-// ----------------------------------------------------------------------------
-
-func joinFlags(prefix string, items []string) string {
-	if len(items) == 0 {
-		return ""
-	}
-	p := make([]string, len(items))
-	for i, s := range items {
-		p[i] = prefix + s
-	}
-	return strings.Join(p, " ")
 }
 
 func cpDir(src, dst string) error {

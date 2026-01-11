@@ -11,20 +11,13 @@ import (
 	"runtime"
 
 	"github.com/qntx/gox/internal/archive"
+	"github.com/qntx/gox/internal/ui"
 )
-
-// ----------------------------------------------------------------------------
-// Constants
-// ----------------------------------------------------------------------------
 
 const (
 	indexURL = "https://ziglang.org/download/index.json"
 	defVer   = "master"
 )
-
-// ----------------------------------------------------------------------------
-// Types
-// ----------------------------------------------------------------------------
 
 // Index maps version names to releases.
 type Index map[string]Release
@@ -43,10 +36,6 @@ type Target struct {
 	Size    string `json:"size"`
 }
 
-// ----------------------------------------------------------------------------
-// Public API
-// ----------------------------------------------------------------------------
-
 // Ensure downloads and caches a Zig version. Returns installation path.
 func Ensure(ctx context.Context, version string) (string, error) {
 	if version == "" {
@@ -57,8 +46,6 @@ func Ensure(ctx context.Context, version string) (string, error) {
 	if hasZig(dir) {
 		return dir, nil
 	}
-
-	fmt.Fprintln(os.Stderr, "fetching zig index...")
 
 	idx, err := fetchIndex(ctx)
 	if err != nil {
@@ -76,11 +63,13 @@ func Ensure(ctx context.Context, version string) (string, error) {
 		return "", fmt.Errorf("no build for %s", host)
 	}
 
-	fmt.Fprintf(os.Stderr, "downloading zig %s (%s)...\n", version, host)
+	ui.Info("Downloading zig %s (%s)...", version, host)
 
 	if err := archive.Download(ctx, tgt.Tarball, dir); err != nil {
 		return "", err
 	}
+
+	ui.Success("Installed zig %s", version)
 	return dir, nil
 }
 
@@ -117,10 +106,6 @@ func Remove(version string) error {
 func RemoveAll() error {
 	return os.RemoveAll(filepath.Join(cacheDir(), "zig"))
 }
-
-// ----------------------------------------------------------------------------
-// Internal
-// ----------------------------------------------------------------------------
 
 var (
 	archMap = map[string]string{

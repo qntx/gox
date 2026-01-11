@@ -1,18 +1,14 @@
 package cli
 
 import (
-	"fmt"
 	"os"
 	"slices"
 
 	"github.com/spf13/cobra"
 
+	"github.com/qntx/gox/internal/ui"
 	"github.com/qntx/gox/internal/zig"
 )
-
-// ----------------------------------------------------------------------------
-// Commands
-// ----------------------------------------------------------------------------
 
 var (
 	zigCmd = &cobra.Command{
@@ -53,18 +49,12 @@ func init() {
 	rootCmd.AddCommand(zigCmd)
 }
 
-// ----------------------------------------------------------------------------
-// Handlers
-// ----------------------------------------------------------------------------
-
 func runZigUpdate(cmd *cobra.Command, args []string) error {
 	version := firstOr(args, "master")
 	force, _ := cmd.Flags().GetBool("force")
 
 	if force {
-		if err := zig.Remove(version); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove: %w", err)
-		}
+		_ = zig.Remove(version)
 	}
 
 	path, err := zig.Ensure(cmd.Context(), version)
@@ -72,7 +62,7 @@ func runZigUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Printf("zig %s: %s\n", version, path)
+	ui.Label("zig", path)
 	return nil
 }
 
@@ -82,14 +72,14 @@ func runZigList(_ *cobra.Command, _ []string) error {
 		return err
 	}
 	if len(versions) == 0 {
-		fmt.Println("no zig versions installed")
+		ui.Info("No zig versions installed")
 		return nil
 	}
 
 	slices.Sort(versions)
-	fmt.Println("installed:")
+	ui.Info("Installed:")
 	for _, v := range versions {
-		fmt.Printf("  %s\t%s\n", v, zig.Path(v))
+		ui.Step("%-12s %s", v, zig.Path(v))
 	}
 	return nil
 }
@@ -101,20 +91,16 @@ func runZigClean(_ *cobra.Command, args []string) error {
 	return cleanAll()
 }
 
-// ----------------------------------------------------------------------------
-// Helpers
-// ----------------------------------------------------------------------------
-
 func cleanOne(version string) error {
 	err := zig.Remove(version)
 	if os.IsNotExist(err) {
-		fmt.Printf("zig %s: not installed\n", version)
+		ui.Warn("zig %s not installed", version)
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	fmt.Printf("removed: %s\n", version)
+	ui.Success("Removed zig %s", version)
 	return nil
 }
 
@@ -124,14 +110,14 @@ func cleanAll() error {
 		return err
 	}
 	if len(versions) == 0 {
-		fmt.Println("nothing to clean")
+		ui.Info("Nothing to clean")
 		return nil
 	}
 
 	if err := zig.RemoveAll(); err != nil {
 		return err
 	}
-	fmt.Printf("removed %d version(s)\n", len(versions))
+	ui.Success("Removed %d version(s)", len(versions))
 	return nil
 }
 

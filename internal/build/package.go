@@ -12,11 +12,8 @@ import (
 	"sync"
 
 	"github.com/qntx/gox/internal/archive"
+	"github.com/qntx/gox/internal/ui"
 )
-
-// ----------------------------------------------------------------------------
-// Types
-// ----------------------------------------------------------------------------
 
 // Package represents a dependency archive.
 type Package struct {
@@ -26,10 +23,6 @@ type Package struct {
 	Include string
 	Lib     string
 }
-
-// ----------------------------------------------------------------------------
-// Public API
-// ----------------------------------------------------------------------------
 
 var ghReleaseRE = regexp.MustCompile(`^([^/]+)/([^@]+)@([^/]+)/(.+)$`)
 
@@ -61,7 +54,6 @@ func (p *Package) Ensure(ctx context.Context) error {
 		return p.check()
 	}
 
-	fmt.Fprintf(os.Stderr, "pkg: %s\n", p.Source)
 	if err := archive.Download(ctx, p.URL, dir); err != nil {
 		os.RemoveAll(dir)
 		return err
@@ -76,7 +68,7 @@ func (p *Package) check() error {
 	return nil
 }
 
-// EnsureAll parses and downloads packages in parallel.
+// EnsureAll parses and downloads packages in parallel with progress.
 func EnsureAll(ctx context.Context, sources []string) ([]*Package, error) {
 	if len(sources) == 0 {
 		return nil, nil
@@ -91,12 +83,32 @@ func EnsureAll(ctx context.Context, sources []string) ([]*Package, error) {
 		pkgs[i] = p
 	}
 
+	// Check which packages need download
+	var toDownload []*Package
+	for _, p := range pkgs {
+		dir := filepath.Join(pkgCache(), p.Dir)
+		if !isDir(dir) {
+			toDownload = append(toDownload, p)
+		} else {
+			p.Include = filepath.Join(dir, "include")
+			p.Lib = filepath.Join(dir, "lib")
+		}
+	}
+
+	if len(toDownload) == 0 {
+		return pkgs, nil
+	}
+
+	// Download with progress tracking
+	tracker := ui.NewTracker()
+	ui.Info("Downloading %d package(s)...", len(toDownload))
+
 	var (
 		wg  sync.WaitGroup
 		mu  sync.Mutex
 		err error
 	)
-	for _, p := range pkgs {
+	for _, p := range toDownload {
 		wg.Go(func() {
 			if e := p.Ensure(ctx); e != nil {
 				mu.Lock()
@@ -104,14 +116,18 @@ func EnsureAll(ctx context.Context, sources []string) ([]*Package, error) {
 					err = e
 				}
 				mu.Unlock()
+				return
 			}
+			tracker.Done(p.Dir, dirSize(filepath.Join(pkgCache(), p.Dir)))
 		})
 	}
 	wg.Wait()
 
 	if err != nil {
+		ui.Error("Download failed: %v", err)
 		return nil, err
 	}
+	ui.Success("Downloaded %d package(s) in %s", len(toDownload), ui.FormatDuration(tracker.Elapsed()))
 	return pkgs, nil
 }
 
@@ -127,10 +143,6 @@ func CollectPaths(pkgs []*Package) (inc, lib []string) {
 	}
 	return
 }
-
-// ----------------------------------------------------------------------------
-// Cache Management
-// ----------------------------------------------------------------------------
 
 // CachedPkg represents a cached package with metadata.
 type CachedPkg struct {
@@ -208,10 +220,6 @@ func countFiles(path string) int {
 	}
 	return count
 }
-
-// ----------------------------------------------------------------------------
-// Internal
-// ----------------------------------------------------------------------------
 
 func isDir(path string) bool {
 	info, err := os.Stat(path)

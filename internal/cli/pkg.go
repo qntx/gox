@@ -9,11 +9,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/qntx/gox/internal/build"
+	"github.com/qntx/gox/internal/ui"
 )
-
-// ----------------------------------------------------------------------------
-// Commands
-// ----------------------------------------------------------------------------
 
 var (
 	pkgCmd = &cobra.Command{
@@ -63,17 +60,13 @@ func init() {
 	rootCmd.AddCommand(pkgCmd)
 }
 
-// ----------------------------------------------------------------------------
-// Handlers
-// ----------------------------------------------------------------------------
-
 func runPkgList(_ *cobra.Command, _ []string) error {
 	pkgs, err := build.ListCached()
 	if err != nil {
 		return err
 	}
 	if len(pkgs) == 0 {
-		fmt.Println("no cached packages")
+		ui.Info("No cached packages")
 		return nil
 	}
 
@@ -82,13 +75,14 @@ func runPkgList(_ *cobra.Command, _ []string) error {
 	})
 
 	var total int64
-	fmt.Println("cached packages:")
+	ui.Info("Cached packages:")
 	for _, p := range pkgs {
-		fmt.Printf("  %-50s %s\n", p.Name, fmtSize(p.Size))
+		ui.Step("%-45s %s", p.Name, ui.FormatSize(p.Size))
 		total += p.Size
 	}
-	fmt.Printf("\ntotal: %d packages, %s\n", len(pkgs), fmtSize(total))
-	fmt.Printf("path:  %s\n", build.CacheDir())
+	fmt.Println()
+	ui.Label("total", fmt.Sprintf("%d packages, %s", len(pkgs), ui.FormatSize(total)))
+	ui.Label("path", build.CacheDir())
 	return nil
 }
 
@@ -108,11 +102,11 @@ func runPkgInfo(_ *cobra.Command, args []string) error {
 	name := args[0]
 	for _, p := range pkgs {
 		if p.Name == name || matchGlob(p.Name, name) {
-			fmt.Printf("name:    %s\n", p.Name)
-			fmt.Printf("path:    %s\n", p.Path)
-			fmt.Printf("size:    %s\n", fmtSize(p.Size))
-			fmt.Printf("include: %d files\n", p.Include)
-			fmt.Printf("lib:     %d files\n", p.Lib)
+			ui.Label("name", p.Name)
+			ui.Label("path", p.Path)
+			ui.Label("size", ui.FormatSize(p.Size))
+			ui.Label("include", fmt.Sprintf("%d files", p.Include))
+			ui.Label("lib", fmt.Sprintf("%d files", p.Lib))
 			return nil
 		}
 	}
@@ -125,22 +119,9 @@ func runPkgInstall(cmd *cobra.Command, args []string) error {
 		ctx = context.Background()
 	}
 
-	for _, src := range args {
-		pkg, err := build.Parse(src)
-		if err != nil {
-			return err
-		}
-		if err := pkg.Ensure(ctx); err != nil {
-			return fmt.Errorf("%s: %w", src, err)
-		}
-		fmt.Printf("installed: %s\n", pkg.Dir)
-	}
-	return nil
+	_, err := build.EnsureAll(ctx, args)
+	return err
 }
-
-// ----------------------------------------------------------------------------
-// Helpers
-// ----------------------------------------------------------------------------
 
 func cleanPkg(pattern string) error {
 	pkgs, err := build.ListCached()
@@ -154,13 +135,13 @@ func cleanPkg(pattern string) error {
 			if err := build.RemoveCached(p.Name); err != nil {
 				return err
 			}
-			fmt.Printf("removed: %s\n", p.Name)
+			ui.Success("Removed %s", p.Name)
 			removed++
 		}
 	}
 
 	if removed == 0 {
-		fmt.Printf("no packages matching %q\n", pattern)
+		ui.Warn("No packages matching %q", pattern)
 	}
 	return nil
 }
@@ -171,14 +152,14 @@ func cleanAllPkgs() error {
 		return err
 	}
 	if len(pkgs) == 0 {
-		fmt.Println("nothing to clean")
+		ui.Info("Nothing to clean")
 		return nil
 	}
 
 	if err := build.RemoveAllCached(); err != nil {
 		return err
 	}
-	fmt.Printf("removed %d package(s)\n", len(pkgs))
+	ui.Success("Removed %d package(s)", len(pkgs))
 	return nil
 }
 
@@ -186,7 +167,6 @@ func matchGlob(name, pattern string) bool {
 	if !strings.Contains(pattern, "*") {
 		return name == pattern
 	}
-	// Simple glob: prefix* or *suffix or prefix*suffix
 	if strings.HasPrefix(pattern, "*") {
 		return strings.HasSuffix(name, pattern[1:])
 	}
@@ -197,22 +177,4 @@ func matchGlob(name, pattern string) bool {
 		return strings.HasPrefix(name, pattern[:i]) && strings.HasSuffix(name, pattern[i+1:])
 	}
 	return false
-}
-
-func fmtSize(b int64) string {
-	const (
-		KB = 1024
-		MB = KB * 1024
-		GB = MB * 1024
-	)
-	switch {
-	case b >= GB:
-		return fmt.Sprintf("%.1f GB", float64(b)/GB)
-	case b >= MB:
-		return fmt.Sprintf("%.1f MB", float64(b)/MB)
-	case b >= KB:
-		return fmt.Sprintf("%.1f KB", float64(b)/KB)
-	default:
-		return fmt.Sprintf("%d B", b)
-	}
 }

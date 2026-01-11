@@ -9,17 +9,9 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// ----------------------------------------------------------------------------
-// Constants & Errors
-// ----------------------------------------------------------------------------
-
 const ConfigFile = "gox.toml"
 
 var ErrConfigNotFound = errors.New("config not found")
-
-// ----------------------------------------------------------------------------
-// Types
-// ----------------------------------------------------------------------------
 
 // Config represents gox.toml.
 type Config struct {
@@ -58,10 +50,6 @@ type Target struct {
 	Verbose    bool     `toml:"verbose"`
 }
 
-// ----------------------------------------------------------------------------
-// Loading
-// ----------------------------------------------------------------------------
-
 // LoadConfig loads config from path or searches upward from cwd.
 func LoadConfig(path string) (*Config, error) {
 	if path == "" {
@@ -99,10 +87,6 @@ func findConfig() string {
 		}
 	}
 }
-
-// ----------------------------------------------------------------------------
-// Conversion
-// ----------------------------------------------------------------------------
 
 // ToOptions converts targets to Options slice.
 func (c *Config) ToOptions(names []string) ([]*Options, error) {
