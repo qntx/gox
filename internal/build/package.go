@@ -132,16 +132,31 @@ func EnsureAll(ctx context.Context, sources []string) ([]*Package, error) {
 }
 
 // CollectPaths returns include and lib directories.
+// Handles Windows SDK convention: lib/x64, lib/Win32, etc.
 func CollectPaths(pkgs []*Package) (inc, lib []string) {
 	for _, p := range pkgs {
 		if isDir(p.Include) {
 			inc = append(inc, p.Include)
 		}
 		if isDir(p.Lib) {
-			lib = append(lib, p.Lib)
+			lib = append(lib, resolveLibDir(p.Lib))
 		}
 	}
 	return
+}
+
+// resolveLibDir handles Windows SDK lib subdirectory conventions.
+// Windows packages often use lib/x64/, lib/Win32/, lib/x86/ structure.
+func resolveLibDir(libDir string) string {
+	// Check for architecture-specific subdirectories (Windows convention)
+	archDirs := []string{"x64", "x86_64", "amd64", "Win32", "x86"}
+	for _, arch := range archDirs {
+		sub := filepath.Join(libDir, arch)
+		if isDir(sub) {
+			return sub
+		}
+	}
+	return libDir
 }
 
 // CachedPkg represents a cached package with metadata.
