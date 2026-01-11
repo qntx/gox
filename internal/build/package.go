@@ -17,79 +17,41 @@ import (
 	"github.com/qntx/gox/internal/ui"
 )
 
-// Package represents a dependency archive.
+// ----------------------------------------------------------------------------
+// Types
+// ----------------------------------------------------------------------------
+
+// Package represents a dependency archive with include/lib/bin directories.
 type Package struct {
 	Source  string
 	URL     string
 	Dir     string
 	Include string
 	Lib     string
-	Bin     string // Windows DLLs directory
+	Bin     string
 }
 
-var ghReleaseRE = regexp.MustCompile(`^([^/]+)/([^@]+)@([^/]+)/(.+)$`)
-
-// Parse parses a package source (URL or owner/repo@version/asset).
-func Parse(source string) (*Package, error) {
-	p := &Package{Source: source}
-
-	switch {
-	case strings.HasPrefix(source, "http://"), strings.HasPrefix(source, "https://"):
-		p.URL = source
-		p.Dir = hashKey(source)
-	case ghReleaseRE.MatchString(source):
-		m := ghReleaseRE.FindStringSubmatch(source)
-		p.URL = fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/%s", m[1], m[2], m[3], m[4])
-		p.Dir = fmt.Sprintf("%s-%s-%s-%s", m[1], m[2], m[3], trimExt(m[4]))
-	default:
-		return nil, fmt.Errorf("invalid package: %s", source)
-	}
-	return p, nil
+// CacheEntry represents a cached package with metadata.
+type CacheEntry struct {
+	Name         string
+	Path         string
+	Size         int64
+	IncludeCount int
+	LibCount     int
 }
 
-// Ensure downloads and extracts if not cached.
-func (p *Package) Ensure(ctx context.Context) error {
-	return p.EnsureWithProgress(ctx, nil)
-}
+// ----------------------------------------------------------------------------
+// Package Patterns
+// ----------------------------------------------------------------------------
 
-// EnsureWithProgress downloads with optional progress bar.
-func (p *Package) EnsureWithProgress(ctx context.Context, bar *ui.Bar) error {
-	dir := filepath.Join(pkgCache(), p.Dir)
-	p.Include = filepath.Join(dir, "include")
-	p.Lib = filepath.Join(dir, "lib")
-	p.Bin = filepath.Join(dir, "bin")
+var (
+	ghReleaseRE = regexp.MustCompile(`^([^/]+)/([^@]+)@([^/]+)/(.+)$`)
+	archiveExts = []string{".tar.gz", ".tgz", ".tar.xz", ".txz", ".zip"}
+)
 
-	if isDir(dir) {
-		if bar != nil {
-			bar.Complete()
-		}
-		return p.check()
-	}
-
-	var proxyReader func(io.Reader) io.Reader
-	if bar != nil {
-		proxyReader = bar.ProxyReader
-	}
-
-	if err := archive.DownloadTo(ctx, p.URL, dir, proxyReader); err != nil {
-		os.RemoveAll(dir)
-		if bar != nil {
-			bar.Abort(true)
-		}
-		return err
-	}
-	if bar != nil {
-		bar.Complete()
-	}
-	return p.check()
-}
-
-func (p *Package) check() error {
-	if !isDir(p.Include) && !isDir(p.Lib) {
-		return fmt.Errorf("%s: missing include/ and lib/", p.Source)
-	}
-	return nil
-}
+// ----------------------------------------------------------------------------
+// Public Functions
+// ----------------------------------------------------------------------------
 
 // EnsureAll parses and downloads packages in parallel with progress.
 func EnsureAll(ctx context.Context, sources []string) ([]*Package, error) {
@@ -99,31 +61,24 @@ func EnsureAll(ctx context.Context, sources []string) ([]*Package, error) {
 
 	pkgs := make([]*Package, len(sources))
 	for i, s := range sources {
-		p, err := Parse(s)
+		p, err := parsePackage(s)
 		if err != nil {
 			return nil, err
 		}
+		p.resolvePaths()
 		pkgs[i] = p
 	}
 
-	// Check which packages need download
 	var toDownload []*Package
 	for _, p := range pkgs {
-		dir := filepath.Join(pkgCache(), p.Dir)
-		if !isDir(dir) {
+		if !p.isCached() {
 			toDownload = append(toDownload, p)
-		} else {
-			p.Include = filepath.Join(dir, "include")
-			p.Lib = filepath.Join(dir, "lib")
-			p.Bin = filepath.Join(dir, "bin")
 		}
 	}
-
 	if len(toDownload) == 0 {
 		return pkgs, nil
 	}
 
-	// Fetch content lengths for progress bars
 	sizes := make(map[string]int64)
 	for _, p := range toDownload {
 		if size, err := archive.ContentLength(ctx, p.URL); err == nil && size > 0 {
@@ -131,23 +86,21 @@ func EnsureAll(ctx context.Context, sources []string) ([]*Package, error) {
 		}
 	}
 
-	// Download with progress bars
 	progress := ui.NewProgress()
 	start := time.Now()
 
 	var (
-		wg  sync.WaitGroup
-		mu  sync.Mutex
-		err error
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		errs []error
 	)
 	for _, p := range toDownload {
 		bar := progress.AddBar(p.Dir, sizes[p.URL])
 		wg.Go(func() {
-			if e := p.EnsureWithProgress(ctx, bar); e != nil {
+			p.resolvePaths()
+			if e := p.download(ctx, bar); e != nil {
 				mu.Lock()
-				if err == nil {
-					err = e
-				}
+				errs = append(errs, fmt.Errorf("%s: %w", p.Source, e))
 				mu.Unlock()
 			}
 		})
@@ -155,16 +108,15 @@ func EnsureAll(ctx context.Context, sources []string) ([]*Package, error) {
 	wg.Wait()
 	progress.Wait()
 
-	if err != nil {
-		ui.Error("Download failed: %v", err)
-		return nil, err
+	if len(errs) > 0 {
+		ui.Error("Download failed: %v", errs[0])
+		return nil, errs[0]
 	}
 	ui.Success("Downloaded %d package(s) in %s", len(toDownload), ui.FormatDuration(time.Since(start)))
 	return pkgs, nil
 }
 
-// CollectPaths returns include, lib, and bin directories.
-// Handles Windows SDK convention: lib/x64, lib/Win32, etc.
+// CollectPaths returns include, lib, and bin directories from packages.
 func CollectPaths(pkgs []*Package) (inc, lib, bin []string) {
 	for _, p := range pkgs {
 		if isDir(p.Include) {
@@ -180,32 +132,9 @@ func CollectPaths(pkgs []*Package) (inc, lib, bin []string) {
 	return
 }
 
-// resolveLibDir handles Windows SDK lib subdirectory conventions.
-// Windows packages often use lib/x64/, lib/Win32/, lib/x86/ structure.
-func resolveLibDir(libDir string) string {
-	// Check for architecture-specific subdirectories (Windows convention)
-	archDirs := []string{"x64", "x86_64", "amd64", "Win32", "x86"}
-	for _, arch := range archDirs {
-		sub := filepath.Join(libDir, arch)
-		if isDir(sub) {
-			return sub
-		}
-	}
-	return libDir
-}
-
-// CachedPkg represents a cached package with metadata.
-type CachedPkg struct {
-	Name    string
-	Path    string
-	Size    int64
-	Include int // file count
-	Lib     int // file count
-}
-
 // ListCached returns all cached packages.
-func ListCached() ([]CachedPkg, error) {
-	root := pkgCache()
+func ListCached() ([]CacheEntry, error) {
+	root := cacheDir()
 	entries, err := os.ReadDir(root)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -214,36 +143,135 @@ func ListCached() ([]CachedPkg, error) {
 		return nil, err
 	}
 
-	var pkgs []CachedPkg
+	var result []CacheEntry
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		p := CachedPkg{
-			Name: e.Name(),
-			Path: filepath.Join(root, e.Name()),
-		}
-		p.Size = dirSize(p.Path)
-		p.Include = countFiles(filepath.Join(p.Path, "include"))
-		p.Lib = countFiles(filepath.Join(p.Path, "lib"))
-		pkgs = append(pkgs, p)
+		path := filepath.Join(root, e.Name())
+		result = append(result, CacheEntry{
+			Name:         e.Name(),
+			Path:         path,
+			Size:         dirSize(path),
+			IncludeCount: countFiles(filepath.Join(path, "include")),
+			LibCount:     countFiles(filepath.Join(path, "lib")),
+		})
 	}
-	return pkgs, nil
+	return result, nil
 }
 
 // RemoveCached removes a cached package by name.
 func RemoveCached(name string) error {
-	return os.RemoveAll(filepath.Join(pkgCache(), name))
+	return os.RemoveAll(filepath.Join(cacheDir(), name))
 }
 
 // RemoveAllCached removes all cached packages.
 func RemoveAllCached() error {
-	return os.RemoveAll(pkgCache())
+	return os.RemoveAll(cacheDir())
 }
 
 // CacheDir returns the package cache directory path.
 func CacheDir() string {
-	return pkgCache()
+	return cacheDir()
+}
+
+// ----------------------------------------------------------------------------
+// Package Methods
+// ----------------------------------------------------------------------------
+
+func (p *Package) resolvePaths() {
+	dir := filepath.Join(cacheDir(), p.Dir)
+	p.Include = filepath.Join(dir, "include")
+	p.Lib = filepath.Join(dir, "lib")
+	p.Bin = filepath.Join(dir, "bin")
+}
+
+func (p *Package) isCached() bool {
+	return isDir(filepath.Join(cacheDir(), p.Dir))
+}
+
+func (p *Package) download(ctx context.Context, bar *ui.Bar) error {
+	dir := filepath.Join(cacheDir(), p.Dir)
+
+	var proxy func(io.Reader) io.Reader
+	if bar != nil {
+		proxy = bar.ProxyReader
+	}
+
+	if err := archive.DownloadTo(ctx, p.URL, dir, proxy); err != nil {
+		os.RemoveAll(dir)
+		if bar != nil {
+			bar.Abort(true)
+		}
+		return err
+	}
+	if bar != nil {
+		bar.Complete()
+	}
+
+	if !isDir(p.Include) && !isDir(p.Lib) {
+		return fmt.Errorf("%s: missing include/ and lib/", p.Source)
+	}
+	return nil
+}
+
+// ----------------------------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------------------------
+
+func parsePackage(source string) (*Package, error) {
+	p := &Package{Source: source}
+	switch {
+	case strings.HasPrefix(source, "http://"), strings.HasPrefix(source, "https://"):
+		p.URL = source
+		p.Dir = urlHash(source)
+	case ghReleaseRE.MatchString(source):
+		m := ghReleaseRE.FindStringSubmatch(source)
+		p.URL = fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/%s", m[1], m[2], m[3], m[4])
+		p.Dir = fmt.Sprintf("%s-%s-%s-%s", m[1], m[2], m[3], trimArchiveExt(m[4]))
+	default:
+		return nil, fmt.Errorf("invalid package: %s", source)
+	}
+	return p, nil
+}
+
+func resolveLibDir(libDir string) string {
+	for _, arch := range []string{"x64", "x86_64", "amd64", "Win32", "x86"} {
+		if sub := filepath.Join(libDir, arch); isDir(sub) {
+			return sub
+		}
+	}
+	return libDir
+}
+
+func cacheDir() string {
+	if dir, err := os.UserCacheDir(); err == nil {
+		return filepath.Join(dir, "gox", "pkg")
+	}
+	return filepath.Join(os.TempDir(), "gox", "pkg")
+}
+
+func urlHash(url string) string {
+	h := sha256.Sum256([]byte(url))
+	name := filepath.Base(url)
+	if i := strings.LastIndex(name, "?"); i > 0 {
+		name = name[:i]
+	}
+	return fmt.Sprintf("url-%s-%s", hex.EncodeToString(h[:8]), trimArchiveExt(name))
+}
+
+func trimArchiveExt(name string) string {
+	for _, ext := range archiveExts {
+		if strings.HasSuffix(name, ext) {
+			return name[:len(name)-len(ext)]
+		}
+	}
+	return name
+}
+
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func dirSize(path string) int64 {
@@ -262,43 +290,11 @@ func countFiles(path string) int {
 	if err != nil {
 		return 0
 	}
-	count := 0
+	n := 0
 	for _, e := range entries {
 		if !e.IsDir() {
-			count++
+			n++
 		}
 	}
-	return count
-}
-
-func isDir(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
-}
-
-func pkgCache() string {
-	if dir, err := os.UserCacheDir(); err == nil {
-		return filepath.Join(dir, "gox", "pkg")
-	}
-	return filepath.Join(os.TempDir(), "gox", "pkg")
-}
-
-func hashKey(url string) string {
-	h := sha256.Sum256([]byte(url))
-	name := filepath.Base(url)
-	if i := strings.LastIndex(name, "?"); i > 0 {
-		name = name[:i]
-	}
-	return fmt.Sprintf("url-%s-%s", hex.EncodeToString(h[:8]), trimExt(name))
-}
-
-var exts = []string{".tar.gz", ".tgz", ".tar.xz", ".txz", ".zip"}
-
-func trimExt(name string) string {
-	for _, ext := range exts {
-		if strings.HasSuffix(name, ext) {
-			return name[:len(name)-len(ext)]
-		}
-	}
-	return name
+	return n
 }

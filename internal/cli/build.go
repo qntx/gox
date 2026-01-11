@@ -14,7 +14,11 @@ import (
 	"github.com/qntx/gox/internal/zig"
 )
 
-type flags struct {
+// ----------------------------------------------------------------------------
+// Types & Variables
+// ----------------------------------------------------------------------------
+
+type buildFlags struct {
 	config   string
 	targets  []string
 	linkMode string
@@ -23,8 +27,7 @@ type flags struct {
 }
 
 var (
-	bf = flags{}
-
+	flags    buildFlags
 	buildCmd = &cobra.Command{
 		Use:   "build [packages]",
 		Short: "Build Go packages with CGO cross-compilation support",
@@ -42,64 +45,55 @@ Use --target to build specific targets (comma-separated or repeated).`,
 func init() {
 	f := buildCmd.Flags()
 
-	// Config
-	f.StringVarP(&bf.config, "config", "c", "", "config file path (default: gox.toml)")
-	f.StringSliceVarP(&bf.targets, "target", "t", nil, "build targets")
-
-	// Platform
-	f.StringVar(&bf.opts.GOOS, "os", "", "target operating system")
-	f.StringVar(&bf.opts.GOARCH, "arch", "", "target architecture")
-
-	// Output
-	f.StringVarP(&bf.opts.Output, "output", "o", "", "output file path")
-	f.StringVar(&bf.opts.Prefix, "prefix", "", "output prefix directory")
-	f.BoolVar(&bf.opts.NoRpath, "no-rpath", false, "disable rpath")
-	f.BoolVar(&bf.opts.Pack, "pack", false, "create archive")
-
-	// Toolchain
-	f.StringVar(&bf.opts.ZigVersion, "zig-version", "", "zig compiler version")
-	f.StringVar(&bf.linkMode, "linkmode", "", "link mode: static|dynamic|auto")
-
-	// Dependencies
-	f.StringSliceVarP(&bf.opts.IncludeDirs, "include", "I", nil, "include directories")
-	f.StringSliceVarP(&bf.opts.LibDirs, "lib", "L", nil, "library directories")
-	f.StringSliceVarP(&bf.opts.Libs, "link", "l", nil, "libraries to link")
-	f.StringSliceVar(&bf.opts.Packages, "pkg", nil, "packages to download")
-
-	// Build
-	f.StringSliceVar(&bf.opts.BuildFlags, "flags", nil, "additional build flags")
-	f.BoolVarP(&bf.opts.Verbose, "verbose", "v", false, "verbose output")
-	f.BoolVarP(&bf.parallel, "parallel", "j", false, "parallel builds")
+	f.StringVarP(&flags.config, "config", "c", "", "config file path (default: gox.toml)")
+	f.StringSliceVarP(&flags.targets, "target", "t", nil, "build targets")
+	f.StringVar(&flags.opts.GOOS, "os", "", "target operating system")
+	f.StringVar(&flags.opts.GOARCH, "arch", "", "target architecture")
+	f.StringVarP(&flags.opts.Output, "output", "o", "", "output file path")
+	f.StringVar(&flags.opts.Prefix, "prefix", "", "output prefix directory")
+	f.StringVar(&flags.opts.ZigVersion, "zig-version", "", "zig compiler version")
+	f.StringVar(&flags.linkMode, "linkmode", "", "link mode: static|dynamic|auto")
+	f.StringSliceVarP(&flags.opts.IncludeDirs, "include", "I", nil, "include directories")
+	f.StringSliceVarP(&flags.opts.LibDirs, "lib", "L", nil, "library directories")
+	f.StringSliceVarP(&flags.opts.Libs, "link", "l", nil, "libraries to link")
+	f.StringSliceVar(&flags.opts.Packages, "pkg", nil, "packages to download")
+	f.StringSliceVar(&flags.opts.BuildFlags, "flags", nil, "additional build flags")
+	f.BoolVar(&flags.opts.NoRpath, "no-rpath", false, "disable rpath")
+	f.BoolVar(&flags.opts.Pack, "pack", false, "create archive")
+	f.BoolVarP(&flags.opts.Verbose, "verbose", "v", false, "verbose output")
+	f.BoolVarP(&flags.parallel, "parallel", "j", false, "parallel builds")
 
 	rootCmd.AddCommand(buildCmd)
 }
 
+// ----------------------------------------------------------------------------
+// Command Handlers
+// ----------------------------------------------------------------------------
+
 func runBuild(cmd *cobra.Command, args []string) error {
-	opts, err := loadOptions(cmd)
+	opts, err := loadBuildOptions(cmd)
 	if err != nil {
 		return err
 	}
-
-	if bf.parallel && len(opts) > 1 {
-		return buildParallel(cmd, args, opts)
+	if flags.parallel && len(opts) > 1 {
+		return runParallel(cmd, args, opts)
 	}
-	return buildSequential(cmd, args, opts)
+	return runSequential(cmd, args, opts)
 }
 
-func buildSequential(cmd *cobra.Command, args []string, opts []*build.Options) error {
+func runSequential(cmd *cobra.Command, args []string, opts []*build.Options) error {
 	for i, o := range opts {
-		if err := doBuild(cmd, args, o, i, len(opts)); err != nil {
+		if err := executeBuild(cmd, args, o, i, len(opts)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func buildParallel(cmd *cobra.Command, args []string, opts []*build.Options) error {
+func runParallel(cmd *cobra.Command, args []string, opts []*build.Options) error {
 	ui.Header(fmt.Sprintf("Building %d targets", len(opts)))
 
-	// Pre-download all packages before parallel builds to avoid progress bar conflicts
-	if err := preDownloadPackages(cmd.Context(), opts); err != nil {
+	if err := preloadPackages(cmd.Context(), opts); err != nil {
 		return err
 	}
 
@@ -115,9 +109,12 @@ func buildParallel(cmd *cobra.Command, args []string, opts []*build.Options) err
 	for _, o := range opts {
 		wg.Go(func() {
 			var buf bytes.Buffer
-			target := fmt.Sprintf("%s/%s", o.GOOS, o.GOARCH)
-			err := doBuildBuffered(cmd, args, o, &buf)
-			results <- result{target: target, output: buf.String(), err: err}
+			err := executeBuildBuffered(cmd, args, o, &buf)
+			results <- result{
+				target: fmt.Sprintf("%s/%s", o.GOOS, o.GOARCH),
+				output: buf.String(),
+				err:    err,
+			}
 		})
 	}
 
@@ -136,18 +133,21 @@ func buildParallel(cmd *cobra.Command, args []string, opts []*build.Options) err
 		}
 	}
 
-	switch len(errs) {
-	case 0:
+	if len(errs) == 0 {
 		ui.Success("All %d targets built", len(opts))
 		return nil
-	case 1:
-		return errs[0]
-	default:
-		return fmt.Errorf("%d targets failed", len(errs))
 	}
+	if len(errs) == 1 {
+		return errs[0]
+	}
+	return fmt.Errorf("%d targets failed", len(errs))
 }
 
-func doBuild(cmd *cobra.Command, args []string, opts *build.Options, idx, total int) error {
+// ----------------------------------------------------------------------------
+// Build Execution
+// ----------------------------------------------------------------------------
+
+func executeBuild(cmd *cobra.Command, args []string, opts *build.Options, idx, total int) error {
 	opts.Normalize()
 	if err := opts.Validate(); err != nil {
 		return err
@@ -166,7 +166,7 @@ func doBuild(cmd *cobra.Command, args []string, opts *build.Options, idx, total 
 	return build.New(zigPath, opts).Run(cmd.Context(), args)
 }
 
-func doBuildBuffered(cmd *cobra.Command, args []string, opts *build.Options, buf *bytes.Buffer) error {
+func executeBuildBuffered(cmd *cobra.Command, args []string, opts *build.Options, buf *bytes.Buffer) error {
 	opts.Normalize()
 	if err := opts.Validate(); err != nil {
 		return err
@@ -180,15 +180,19 @@ func doBuildBuffered(cmd *cobra.Command, args []string, opts *build.Options, buf
 	return build.NewWithOutput(zigPath, opts, buf, buf).Run(cmd.Context(), args)
 }
 
-func loadOptions(cmd *cobra.Command) ([]*build.Options, error) {
-	cfg, err := build.LoadConfig(bf.config)
+// ----------------------------------------------------------------------------
+// Options Loading
+// ----------------------------------------------------------------------------
+
+func loadBuildOptions(cmd *cobra.Command) ([]*build.Options, error) {
+	cfg, err := build.LoadConfig(flags.config)
 	if err != nil && !errors.Is(err, build.ErrConfigNotFound) {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 
 	var opts []*build.Options
 	if cfg != nil {
-		opts, err = cfg.ToOptions(bf.targets)
+		opts, err = cfg.ToOptions(flags.targets)
 		if err != nil {
 			return nil, fmt.Errorf("config: %w", err)
 		}
@@ -197,79 +201,72 @@ func loadOptions(cmd *cobra.Command) ([]*build.Options, error) {
 	}
 
 	for _, o := range opts {
-		mergeFlags(cmd, o)
+		applyFlagOverrides(cmd, o)
 	}
 	return opts, nil
 }
 
-func mergeFlags(cmd *cobra.Command, o *build.Options) {
-	f := cmd.Flags()
+func applyFlagOverrides(cmd *cobra.Command, o *build.Options) {
+	changed := cmd.Flags().Changed
 
-	// Strings
-	setIf(f, "os", &o.GOOS, bf.opts.GOOS)
-	setIf(f, "arch", &o.GOARCH, bf.opts.GOARCH)
-	setIf(f, "output", &o.Output, bf.opts.Output)
-	setIf(f, "prefix", &o.Prefix, bf.opts.Prefix)
-	setIf(f, "zig-version", &o.ZigVersion, bf.opts.ZigVersion)
-
-	// Slices
-	setSliceIf(f, "include", &o.IncludeDirs, bf.opts.IncludeDirs)
-	setSliceIf(f, "lib", &o.LibDirs, bf.opts.LibDirs)
-	setSliceIf(f, "link", &o.Libs, bf.opts.Libs)
-	setSliceIf(f, "pkg", &o.Packages, bf.opts.Packages)
-	setSliceIf(f, "flags", &o.BuildFlags, bf.opts.BuildFlags)
-
-	// Bools
-	setBoolIf(f, "no-rpath", &o.NoRpath, bf.opts.NoRpath)
-	setBoolIf(f, "pack", &o.Pack, bf.opts.Pack)
-	setBoolIf(f, "verbose", &o.Verbose, bf.opts.Verbose)
-
-	// LinkMode
-	if f.Changed("linkmode") {
-		o.LinkMode = build.LinkMode(bf.linkMode)
+	if changed("os") {
+		o.GOOS = flags.opts.GOOS
+	}
+	if changed("arch") {
+		o.GOARCH = flags.opts.GOARCH
+	}
+	if changed("output") {
+		o.Output = flags.opts.Output
+	}
+	if changed("prefix") {
+		o.Prefix = flags.opts.Prefix
+	}
+	if changed("zig-version") {
+		o.ZigVersion = flags.opts.ZigVersion
+	}
+	if changed("linkmode") {
+		o.LinkMode = build.LinkMode(flags.linkMode)
+	}
+	if changed("include") {
+		o.IncludeDirs = flags.opts.IncludeDirs
+	}
+	if changed("lib") {
+		o.LibDirs = flags.opts.LibDirs
+	}
+	if changed("link") {
+		o.Libs = flags.opts.Libs
+	}
+	if changed("pkg") {
+		o.Packages = flags.opts.Packages
+	}
+	if changed("flags") {
+		o.BuildFlags = flags.opts.BuildFlags
+	}
+	if changed("no-rpath") {
+		o.NoRpath = flags.opts.NoRpath
+	}
+	if changed("pack") {
+		o.Pack = flags.opts.Pack
+	}
+	if changed("verbose") {
+		o.Verbose = flags.opts.Verbose
 	}
 }
 
-type changedChecker interface{ Changed(string) bool }
-
-func setIf(f changedChecker, name string, dst *string, src string) {
-	if f.Changed(name) {
-		*dst = src
-	}
-}
-
-func setSliceIf(f changedChecker, name string, dst *[]string, src []string) {
-	if f.Changed(name) {
-		*dst = src
-	}
-}
-
-func setBoolIf(f changedChecker, name string, dst *bool, src bool) {
-	if f.Changed(name) {
-		*dst = src
-	}
-}
-
-// preDownloadPackages downloads all packages from all build options before builds start.
-// This prevents progress bar conflicts when multiple builds download concurrently.
-func preDownloadPackages(ctx context.Context, opts []*build.Options) error {
-	// Collect all unique packages
+func preloadPackages(ctx context.Context, opts []*build.Options) error {
 	seen := make(map[string]bool)
-	var allPkgs []string
+	var pkgs []string
 	for _, o := range opts {
 		for _, pkg := range o.Packages {
 			if !seen[pkg] {
 				seen[pkg] = true
-				allPkgs = append(allPkgs, pkg)
+				pkgs = append(pkgs, pkg)
 			}
 		}
 	}
-
-	if len(allPkgs) == 0 {
+	if len(pkgs) == 0 {
 		return nil
 	}
-
-	// Download all packages in one batch
-	_, err := build.EnsureAll(ctx, allPkgs)
+	_, err := build.EnsureAll(ctx, pkgs)
 	return err
 }

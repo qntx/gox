@@ -71,7 +71,7 @@ func runPkgList(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	slices.SortFunc(pkgs, func(a, b build.CachedPkg) int {
+	slices.SortFunc(pkgs, func(a, b build.CacheEntry) int {
 		return strings.Compare(a.Name, b.Name)
 	})
 
@@ -80,7 +80,7 @@ func runPkgList(_ *cobra.Command, _ []string) error {
 	tbl := ui.NewTable("NAME", "SIZE", "INCLUDE", "LIB")
 	var total int64
 	for _, p := range pkgs {
-		tbl.AddRow(p.Name, ui.FormatSize(p.Size), fmt.Sprintf("%d", p.Include), fmt.Sprintf("%d", p.Lib))
+		tbl.AddRow(p.Name, ui.FormatSize(p.Size), fmt.Sprintf("%d", p.IncludeCount), fmt.Sprintf("%d", p.LibCount))
 		total += p.Size
 	}
 	tbl.Render()
@@ -111,8 +111,8 @@ func runPkgInfo(_ *cobra.Command, args []string) error {
 			ui.Label("name", p.Name)
 			ui.Label("path", p.Path)
 			ui.Label("size", ui.FormatSize(p.Size))
-			ui.Label("include", fmt.Sprintf("%d files", p.Include))
-			ui.Label("lib", fmt.Sprintf("%d files", p.Lib))
+			ui.Label("include", fmt.Sprintf("%d files", p.IncludeCount))
+			ui.Label("lib", fmt.Sprintf("%d files", p.LibCount))
 			return nil
 		}
 	}

@@ -7,8 +7,35 @@ import (
 	"runtime"
 )
 
+// ----------------------------------------------------------------------------
+// Types
+// ----------------------------------------------------------------------------
+
 // LinkMode specifies binary linking strategy.
 type LinkMode string
+
+// Options configures a build operation.
+type Options struct {
+	GOOS        string
+	GOARCH      string
+	Output      string
+	Prefix      string
+	ZigVersion  string
+	LinkMode    LinkMode
+	IncludeDirs []string
+	LibDirs     []string
+	BinDirs     []string
+	Libs        []string
+	Packages    []string
+	BuildFlags  []string
+	NoRpath     bool
+	Pack        bool
+	Verbose     bool
+}
+
+// ----------------------------------------------------------------------------
+// Constants
+// ----------------------------------------------------------------------------
 
 const (
 	LinkAuto    LinkMode = "auto"
@@ -16,39 +43,45 @@ const (
 	LinkDynamic LinkMode = "dynamic"
 )
 
+// ----------------------------------------------------------------------------
+// Zig Target Mappings
+// ----------------------------------------------------------------------------
+
+var (
+	zigArch = map[string]string{
+		"386":     "x86",
+		"amd64":   "x86_64",
+		"arm":     "arm",
+		"arm64":   "aarch64",
+		"loong64": "loongarch64",
+		"ppc64le": "powerpc64le",
+		"riscv64": "riscv64",
+		"s390x":   "s390x",
+	}
+	zigOS = map[string]string{
+		"darwin":  "macos",
+		"freebsd": "freebsd",
+		"linux":   "linux-gnu",
+		"netbsd":  "netbsd",
+		"windows": "windows-gnu",
+	}
+)
+
+// ----------------------------------------------------------------------------
+// LinkMode Methods
+// ----------------------------------------------------------------------------
+
 func (m LinkMode) Valid() bool {
 	return m == LinkAuto || m == LinkStatic || m == LinkDynamic
 }
 
-func (m LinkMode) IsStatic() bool { return m == LinkStatic }
-
-// Options configures a build operation.
-type Options struct {
-	// Platform
-	GOOS   string
-	GOARCH string
-
-	// Output
-	Output  string
-	Prefix  string
-	NoRpath bool
-	Pack    bool
-
-	// Toolchain
-	ZigVersion string
-	LinkMode   LinkMode
-
-	// Dependencies
-	IncludeDirs []string
-	LibDirs     []string
-	BinDirs     []string // Windows DLL directories
-	Libs        []string
-	Packages    []string
-
-	// Build
-	BuildFlags []string
-	Verbose    bool
+func (m LinkMode) IsStatic() bool {
+	return m == LinkStatic
 }
+
+// ----------------------------------------------------------------------------
+// Options Methods
+// ----------------------------------------------------------------------------
 
 // Normalize applies defaults for unset fields.
 func (o *Options) Normalize() {
@@ -83,58 +116,25 @@ func (o *Options) Validate() error {
 	return nil
 }
 
-var (
-	zigArch = map[string]string{
-		"amd64":   "x86_64",
-		"386":     "x86",
-		"arm64":   "aarch64",
-		"arm":     "arm",
-		"riscv64": "riscv64",
-		"loong64": "loongarch64",
-		"ppc64le": "powerpc64le",
-		"s390x":   "s390x",
-	}
-	zigOS = map[string]string{
-		"linux":   "linux-gnu",
-		"darwin":  "macos",
-		"windows": "windows-gnu",
-		"freebsd": "freebsd",
-		"netbsd":  "netbsd",
-	}
-)
-
-// ZigTarget returns the Zig cross-compilation target string.
+// ZigTarget returns the Zig cross-compilation target triple.
 func (o *Options) ZigTarget() string {
-	return o.resolveArch() + "-" + o.resolveOS()
-}
-
-func (o *Options) resolveArch() string {
-	if v, ok := zigArch[o.GOARCH]; ok {
-		return v
-	}
-	return o.GOARCH
-}
-
-func (o *Options) resolveOS() string {
+	arch := zigArch[o.GOARCH]
+	os := zigOS[o.GOOS]
 	if o.GOOS == "linux" {
-		return o.linuxABI()
+		os = o.linuxABI()
 	}
-	if v, ok := zigOS[o.GOOS]; ok {
-		return v
-	}
-	return o.GOOS
+	return arch + "-" + os
 }
 
 func (o *Options) linuxABI() string {
-	arm, static := o.GOARCH == "arm", o.LinkMode.IsStatic()
-	switch {
-	case arm && static:
-		return "linux-musleabihf"
-	case arm:
-		return "linux-gnueabihf"
-	case static:
+	if o.LinkMode.IsStatic() {
+		if o.GOARCH == "arm" {
+			return "linux-musleabihf"
+		}
 		return "linux-musl"
-	default:
-		return "linux-gnu"
 	}
+	if o.GOARCH == "arm" {
+		return "linux-gnueabihf"
+	}
+	return "linux-gnu"
 }

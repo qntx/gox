@@ -15,7 +15,11 @@ import (
 	"github.com/qntx/gox/internal/ui"
 )
 
-// Builder orchestrates cross-compilation using Zig.
+// ----------------------------------------------------------------------------
+// Types
+// ----------------------------------------------------------------------------
+
+// Builder orchestrates cross-compilation using Zig as the C toolchain.
 type Builder struct {
 	zig    string
 	opts   *Options
@@ -23,7 +27,11 @@ type Builder struct {
 	stderr io.Writer
 }
 
-// New creates a Builder with stdout/stderr going to os.Stdout/os.Stderr.
+// ----------------------------------------------------------------------------
+// Constructors
+// ----------------------------------------------------------------------------
+
+// New creates a Builder with default stdout/stderr.
 func New(zigPath string, opts *Options) *Builder {
 	return &Builder{zig: zigPath, opts: opts, stdout: os.Stdout, stderr: os.Stderr}
 }
@@ -33,7 +41,11 @@ func NewWithOutput(zigPath string, opts *Options, stdout, stderr io.Writer) *Bui
 	return &Builder{zig: zigPath, opts: opts, stdout: stdout, stderr: stderr}
 }
 
-// Run executes: packages → build → libs → pack.
+// ----------------------------------------------------------------------------
+// Builder Methods
+// ----------------------------------------------------------------------------
+
+// Run executes the full build pipeline.
 func (b *Builder) Run(ctx context.Context, pkgs []string) error {
 	if err := b.setupPackages(ctx); err != nil {
 		return fmt.Errorf("packages: %w", err)
@@ -41,14 +53,16 @@ func (b *Builder) Run(ctx context.Context, pkgs []string) error {
 	if err := b.setupDirs(); err != nil {
 		return fmt.Errorf("dirs: %w", err)
 	}
-	if err := b.build(ctx, pkgs); err != nil {
+	if err := b.compile(ctx, pkgs); err != nil {
 		return err
 	}
 	if err := b.copyLibs(); err != nil {
 		return fmt.Errorf("libs: %w", err)
 	}
 	if b.opts.Pack {
-		return b.pack()
+		if err := b.createArchive(); err != nil {
+			return fmt.Errorf("pack: %w", err)
+		}
 	}
 	return nil
 }
@@ -69,7 +83,7 @@ func (b *Builder) setupPackages(ctx context.Context) error {
 }
 
 func (b *Builder) setupDirs() error {
-	out := b.output()
+	out := b.outputPath()
 	if out == "" {
 		return nil
 	}
@@ -78,20 +92,19 @@ func (b *Builder) setupDirs() error {
 			return err
 		}
 	}
-	// Windows uses flat structure, others use bin/lib structure
 	if b.opts.Prefix != "" && b.opts.GOOS != "windows" {
 		return os.MkdirAll(filepath.Join(b.opts.Prefix, "lib"), 0o755)
 	}
 	return nil
 }
 
-func (b *Builder) build(ctx context.Context, pkgs []string) error {
-	env := b.env()
-	args := b.args(pkgs)
+func (b *Builder) compile(ctx context.Context, pkgs []string) error {
+	env := b.buildEnv()
+	args := b.buildArgs(pkgs)
 
 	ui.Building(fmt.Sprintf("%s/%s", b.opts.GOOS, b.opts.GOARCH))
 	if b.opts.Verbose {
-		b.log(env, args)
+		b.logBuild(env, args)
 	}
 
 	start := time.Now()
@@ -104,7 +117,7 @@ func (b *Builder) build(ctx context.Context, pkgs []string) error {
 		return err
 	}
 
-	ui.Built(b.output(), time.Since(start))
+	ui.Built(b.outputPath(), time.Since(start))
 	return nil
 }
 
@@ -114,12 +127,11 @@ func (b *Builder) copyLibs() error {
 	}
 
 	if b.opts.GOOS == "windows" {
-		// Windows: copy DLLs from bin directories to prefix (flat, alongside exe)
 		if len(b.opts.BinDirs) == 0 {
 			return nil
 		}
 		for _, src := range b.opts.BinDirs {
-			if err := cpDir(src, b.opts.Prefix); err != nil {
+			if err := copyDir(src, b.opts.Prefix); err != nil {
 				return fmt.Errorf("%s: %w", src, err)
 			}
 		}
@@ -129,13 +141,12 @@ func (b *Builder) copyLibs() error {
 		return nil
 	}
 
-	// Unix: copy shared libs to prefix/lib
 	if len(b.opts.LibDirs) == 0 {
 		return nil
 	}
 	dst := filepath.Join(b.opts.Prefix, "lib")
 	for _, src := range b.opts.LibDirs {
-		if err := cpDir(src, dst); err != nil {
+		if err := copyDir(src, dst); err != nil {
 			return fmt.Errorf("%s: %w", src, err)
 		}
 	}
@@ -145,7 +156,7 @@ func (b *Builder) copyLibs() error {
 	return nil
 }
 
-func (b *Builder) pack() error {
+func (b *Builder) createArchive() error {
 	src := b.opts.Prefix
 	if src == "" {
 		src = b.opts.Output
@@ -163,31 +174,35 @@ func (b *Builder) pack() error {
 	return nil
 }
 
-func (b *Builder) env() []string {
-	tgt := b.opts.ZigTarget()
+// ----------------------------------------------------------------------------
+// Build Environment
+// ----------------------------------------------------------------------------
+
+func (b *Builder) buildEnv() []string {
+	target := b.opts.ZigTarget()
 	env := []string{
 		"CGO_ENABLED=1",
 		"GOOS=" + b.opts.GOOS,
 		"GOARCH=" + b.opts.GOARCH,
-		"CC=" + b.cc("cc", tgt),
-		"CXX=" + b.cc("c++", tgt),
+		"CC=" + b.zigCC("cc", target),
+		"CXX=" + b.zigCC("c++", target),
 	}
-	if f := b.cflags(); f != "" {
-		env = append(env, "CGO_CFLAGS="+f)
+	if flags := b.cgoFlags(); flags != "" {
+		env = append(env, "CGO_CFLAGS="+flags)
 	}
-	if f := b.ldflags(); f != "" {
-		env = append(env, "CGO_LDFLAGS="+f)
+	if flags := b.cgoLDFlags(); flags != "" {
+		env = append(env, "CGO_LDFLAGS="+flags)
 	}
 	return env
 }
 
-func (b *Builder) args(pkgs []string) []string {
+func (b *Builder) buildArgs(pkgs []string) []string {
 	args := []string{"build"}
-	if out := b.output(); out != "" {
+	if out := b.outputPath(); out != "" {
 		args = append(args, "-o", out)
 	}
-	if f := b.goflags(); f != "" {
-		args = append(args, "-ldflags="+f)
+	if flags := b.goLDFlags(); flags != "" {
+		args = append(args, "-ldflags="+flags)
 	}
 	args = append(args, b.opts.BuildFlags...)
 	if len(pkgs) == 0 {
@@ -196,7 +211,7 @@ func (b *Builder) args(pkgs []string) []string {
 	return append(args, pkgs...)
 }
 
-func (b *Builder) cc(mode, target string) string {
+func (b *Builder) zigCC(mode, target string) string {
 	bin := filepath.Join(b.zig, "zig")
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
@@ -204,45 +219,43 @@ func (b *Builder) cc(mode, target string) string {
 	return fmt.Sprintf("%s %s -target %s", bin, mode, target)
 }
 
-func (b *Builder) cflags() string {
-	var p []string
-	// Suppress known harmless warnings
-	p = append(p, "-Wno-macro-redefined")
+func (b *Builder) cgoFlags() string {
+	flags := []string{"-Wno-macro-redefined"}
 	for _, d := range b.opts.IncludeDirs {
-		p = append(p, "-I"+d)
+		flags = append(flags, "-I"+d)
 	}
-	return strings.Join(p, " ")
+	return strings.Join(flags, " ")
 }
 
-func (b *Builder) ldflags() string {
-	var p []string
+func (b *Builder) cgoLDFlags() string {
+	var flags []string
 	for _, d := range b.opts.LibDirs {
-		p = append(p, "-L"+d)
+		flags = append(flags, "-L"+d)
 	}
 	for _, l := range b.opts.Libs {
-		p = append(p, "-l"+l)
+		flags = append(flags, "-l"+l)
 	}
 	if b.opts.LinkMode.IsStatic() {
-		p = append(p, "-static")
+		flags = append(flags, "-static")
 	}
-	if r := b.rpath(); r != "" {
-		p = append(p, r)
+	if rpath := b.rpath(); rpath != "" {
+		flags = append(flags, rpath)
 	}
-	return strings.Join(p, " ")
+	return strings.Join(flags, " ")
 }
 
-func (b *Builder) goflags() string {
-	var f []string
+func (b *Builder) goLDFlags() string {
+	var flags []string
 	if b.opts.GOOS == "darwin" && runtime.GOOS != "darwin" {
-		f = append(f, "-w")
+		flags = append(flags, "-w")
 	}
 	switch b.opts.LinkMode {
 	case LinkStatic:
-		f = append(f, "-linkmode=external", `-extldflags "-static"`)
+		flags = append(flags, "-linkmode=external", `-extldflags "-static"`)
 	case LinkDynamic:
-		f = append(f, "-linkmode=external")
+		flags = append(flags, "-linkmode=external")
 	}
-	return strings.Join(f, " ")
+	return strings.Join(flags, " ")
 }
 
 func (b *Builder) rpath() string {
@@ -258,7 +271,7 @@ func (b *Builder) rpath() string {
 	return ""
 }
 
-func (b *Builder) output() string {
+func (b *Builder) outputPath() string {
 	if b.opts.Output != "" {
 		return b.opts.Output
 	}
@@ -267,22 +280,23 @@ func (b *Builder) output() string {
 	}
 	name := filepath.Base(b.opts.Prefix)
 	if b.opts.GOOS == "windows" {
-		// Windows: flat structure (exe directly in prefix)
-		name += ".exe"
-		return filepath.Join(b.opts.Prefix, name)
+		return filepath.Join(b.opts.Prefix, name+".exe")
 	}
-	// Unix: bin/lib structure
 	return filepath.Join(b.opts.Prefix, "bin", name)
 }
 
-func (b *Builder) log(env, args []string) {
-	if out := b.output(); out != "" {
+func (b *Builder) logBuild(env, args []string) {
+	if out := b.outputPath(); out != "" {
 		fmt.Fprintf(os.Stderr, "out: %s\n", out)
 	}
 	fmt.Fprintf(os.Stderr, "env: %v\ngo %s\n", env, strings.Join(args, " "))
 }
 
-func cpDir(src, dst string) error {
+// ----------------------------------------------------------------------------
+// File Operations
+// ----------------------------------------------------------------------------
+
+func copyDir(src, dst string) error {
 	entries, err := os.ReadDir(src)
 	if err != nil {
 		return err
@@ -291,29 +305,30 @@ func cpDir(src, dst string) error {
 		if e.IsDir() {
 			continue
 		}
-		s := filepath.Join(src, e.Name())
-		d := filepath.Join(dst, e.Name())
+		srcPath := filepath.Join(src, e.Name())
+		dstPath := filepath.Join(dst, e.Name())
 
 		info, err := e.Info()
 		if err != nil {
 			return err
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			err = cpLink(s, d)
+			if err := copySymlink(srcPath, dstPath); err != nil {
+				return err
+			}
 		} else {
-			err = cpFile(s, d, info.Mode())
-		}
-		if err != nil {
-			return err
+			if err := copyFile(srcPath, dstPath, info.Mode()); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-func cpLink(src, dst string) error {
+func copySymlink(src, dst string) error {
 	target, err := os.Readlink(src)
 	if err != nil {
-		return cpFile(src, dst, 0)
+		return copyFile(src, dst, 0)
 	}
 	_ = os.Remove(dst)
 	if os.Symlink(target, dst) == nil {
@@ -322,10 +337,10 @@ func cpLink(src, dst string) error {
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(filepath.Dir(src), target)
 	}
-	return cpFile(target, dst, 0)
+	return copyFile(target, dst, 0)
 }
 
-func cpFile(src, dst string, mode os.FileMode) error {
+func copyFile(src, dst string, mode os.FileMode) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err

@@ -9,18 +9,18 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-const ConfigFile = "gox.toml"
+// ----------------------------------------------------------------------------
+// Types
+// ----------------------------------------------------------------------------
 
-var ErrConfigNotFound = errors.New("config not found")
-
-// Config represents gox.toml.
+// Config represents gox.toml structure.
 type Config struct {
-	Default Default  `toml:"default"`
-	Targets []Target `toml:"target"`
+	Default ConfigDefault  `toml:"default"`
+	Targets []ConfigTarget `toml:"target"`
 }
 
-// Default holds inherited values for all targets.
-type Default struct {
+// ConfigDefault holds values inherited by all targets.
+type ConfigDefault struct {
 	ZigVersion string   `toml:"zig-version"`
 	LinkMode   string   `toml:"linkmode"`
 	Include    []string `toml:"include"`
@@ -31,15 +31,13 @@ type Default struct {
 	Verbose    bool     `toml:"verbose"`
 }
 
-// Target defines a build target.
-type Target struct {
+// ConfigTarget defines a platform-specific build configuration.
+type ConfigTarget struct {
 	Name       string   `toml:"name"`
 	OS         string   `toml:"os"`
 	Arch       string   `toml:"arch"`
 	Output     string   `toml:"output"`
 	Prefix     string   `toml:"prefix"`
-	NoRpath    bool     `toml:"no-rpath"`
-	Pack       bool     `toml:"pack"`
 	ZigVersion string   `toml:"zig-version"`
 	LinkMode   string   `toml:"linkmode"`
 	Include    []string `toml:"include"`
@@ -47,17 +45,31 @@ type Target struct {
 	Link       []string `toml:"link"`
 	Packages   []string `toml:"packages"`
 	Flags      []string `toml:"flags"`
+	NoRpath    bool     `toml:"no-rpath"`
+	Pack       bool     `toml:"pack"`
 	Verbose    bool     `toml:"verbose"`
 }
+
+// ----------------------------------------------------------------------------
+// Constants & Errors
+// ----------------------------------------------------------------------------
+
+const ConfigFile = "gox.toml"
+
+var ErrConfigNotFound = errors.New("config not found")
+
+// ----------------------------------------------------------------------------
+// Public Functions
+// ----------------------------------------------------------------------------
 
 // LoadConfig loads config from path or searches upward from cwd.
 func LoadConfig(path string) (*Config, error) {
 	if path == "" {
-		if path = findConfig(); path == "" {
+		path = findConfig()
+		if path == "" {
 			return nil, ErrConfigNotFound
 		}
 	}
-
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -65,10 +77,99 @@ func LoadConfig(path string) (*Config, error) {
 		}
 		return nil, err
 	}
-
 	var cfg Config
 	return &cfg, toml.Unmarshal(data, &cfg)
 }
+
+// ----------------------------------------------------------------------------
+// Config Methods
+// ----------------------------------------------------------------------------
+
+// ToOptions converts targets to Options slice.
+func (c *Config) ToOptions(names []string) ([]*Options, error) {
+	targets, err := c.selectTargets(names)
+	if err != nil {
+		return nil, err
+	}
+	if len(targets) == 0 {
+		return []*Options{c.defaultOptions()}, nil
+	}
+	out := make([]*Options, len(targets))
+	for i, t := range targets {
+		out[i] = c.mergeOptions(t)
+	}
+	return out, nil
+}
+
+func (c *Config) selectTargets(names []string) ([]*ConfigTarget, error) {
+	if len(names) == 0 {
+		out := make([]*ConfigTarget, len(c.Targets))
+		for i := range c.Targets {
+			out[i] = &c.Targets[i]
+		}
+		return out, nil
+	}
+	out := make([]*ConfigTarget, 0, len(names))
+	for _, name := range names {
+		found := false
+		for i := range c.Targets {
+			if c.Targets[i].Name == name {
+				out = append(out, &c.Targets[i])
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("target %q not found", name)
+		}
+	}
+	return out, nil
+}
+
+func (c *Config) defaultOptions() *Options {
+	d := &c.Default
+	return &Options{
+		ZigVersion:  d.ZigVersion,
+		LinkMode:    LinkMode(d.LinkMode),
+		IncludeDirs: append([]string(nil), d.Include...),
+		LibDirs:     append([]string(nil), d.Lib...),
+		Libs:        append([]string(nil), d.Link...),
+		Packages:    append([]string(nil), d.Packages...),
+		BuildFlags:  append([]string(nil), d.Flags...),
+		Verbose:     d.Verbose,
+	}
+}
+
+func (c *Config) mergeOptions(t *ConfigTarget) *Options {
+	d := &c.Default
+	zigVer, linkMode := t.ZigVersion, t.LinkMode
+	if zigVer == "" {
+		zigVer = d.ZigVersion
+	}
+	if linkMode == "" {
+		linkMode = d.LinkMode
+	}
+	return &Options{
+		GOOS:        t.OS,
+		GOARCH:      t.Arch,
+		Output:      t.Output,
+		Prefix:      t.Prefix,
+		ZigVersion:  zigVer,
+		LinkMode:    LinkMode(linkMode),
+		IncludeDirs: mergeSlices(d.Include, t.Include),
+		LibDirs:     mergeSlices(d.Lib, t.Lib),
+		Libs:        mergeSlices(d.Link, t.Link),
+		Packages:    mergeSlices(d.Packages, t.Packages),
+		BuildFlags:  mergeSlices(d.Flags, t.Flags),
+		NoRpath:     t.NoRpath,
+		Pack:        t.Pack,
+		Verbose:     d.Verbose || t.Verbose,
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------------------------
 
 func findConfig() string {
 	cwd, err := os.Getwd()
@@ -80,97 +181,20 @@ func findConfig() string {
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}
-		if parent := filepath.Dir(dir); parent == dir {
+		parent := filepath.Dir(dir)
+		if parent == dir {
 			return ""
-		} else {
-			dir = parent
 		}
+		dir = parent
 	}
 }
 
-// ToOptions converts targets to Options slice.
-func (c *Config) ToOptions(names []string) ([]*Options, error) {
-	targets, err := c.selectTargets(names)
-	if err != nil {
-		return nil, err
+func mergeSlices(base, override []string) []string {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
 	}
-	if len(targets) == 0 {
-		return []*Options{c.baseOptions()}, nil
-	}
-
-	out := make([]*Options, len(targets))
-	for i, t := range targets {
-		out[i] = c.targetOptions(t)
-	}
-	return out, nil
-}
-
-func (c *Config) selectTargets(names []string) ([]*Target, error) {
-	if len(names) == 0 {
-		out := make([]*Target, len(c.Targets))
-		for i := range c.Targets {
-			out[i] = &c.Targets[i]
-		}
-		return out, nil
-	}
-
-	out := make([]*Target, 0, len(names))
-	for _, name := range names {
-		if t := c.findTarget(name); t != nil {
-			out = append(out, t)
-		} else {
-			return nil, fmt.Errorf("target %q not found", name)
-		}
-	}
-	return out, nil
-}
-
-func (c *Config) findTarget(name string) *Target {
-	for i := range c.Targets {
-		if c.Targets[i].Name == name {
-			return &c.Targets[i]
-		}
-	}
-	return nil
-}
-
-func (c *Config) baseOptions() *Options {
-	d := &c.Default
-	return &Options{
-		ZigVersion:  d.ZigVersion,
-		LinkMode:    LinkMode(d.LinkMode),
-		IncludeDirs: d.Include,
-		LibDirs:     d.Lib,
-		Libs:        d.Link,
-		Packages:    d.Packages,
-		BuildFlags:  d.Flags,
-		Verbose:     d.Verbose,
-	}
-}
-
-func (c *Config) targetOptions(t *Target) *Options {
-	d := &c.Default
-	return &Options{
-		GOOS:        t.OS,
-		GOARCH:      t.Arch,
-		Output:      t.Output,
-		Prefix:      t.Prefix,
-		NoRpath:     t.NoRpath,
-		Pack:        t.Pack,
-		ZigVersion:  coalesce(t.ZigVersion, d.ZigVersion),
-		LinkMode:    LinkMode(coalesce(t.LinkMode, d.LinkMode)),
-		IncludeDirs: append(d.Include, t.Include...),
-		LibDirs:     append(d.Lib, t.Lib...),
-		Libs:        append(d.Link, t.Link...),
-		Packages:    append(d.Packages, t.Packages...),
-		BuildFlags:  append(d.Flags, t.Flags...),
-		Verbose:     d.Verbose || t.Verbose,
-	}
-}
-
-func coalesce(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
+	out := make([]string, 0, len(base)+len(override))
+	out = append(out, base...)
+	out = append(out, override...)
+	return out
 }
