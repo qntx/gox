@@ -540,24 +540,6 @@ func copyTo(w io.Writer, path string) error {
 	return err
 }
 
-func fetchTo(path string, r io.Reader, pw io.Writer) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-
-	var dst io.Writer = f
-	if pw != nil {
-		dst = io.MultiWriter(f, pw)
-	}
-
-	_, err = io.Copy(dst, r)
-	if e := f.Close(); err == nil {
-		err = e
-	}
-	return err
-}
-
 func fetchToReader(path string, r io.Reader) error {
 	f, err := os.Create(path)
 	if err != nil {

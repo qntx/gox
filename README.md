@@ -56,7 +56,7 @@ gox build --os windows --arch amd64 --prefix ./dist --pack
 gox build -j
 ```
 
-See examples in the [examples](./examples) directory.
+See examples in the [example](./example) directory.
 
 ## Configuration
 

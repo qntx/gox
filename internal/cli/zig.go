@@ -50,7 +50,10 @@ func init() {
 }
 
 func runZigUpdate(cmd *cobra.Command, args []string) error {
-	version := firstOr(args, "master")
+	version := "master"
+	if len(args) > 0 {
+		version = args[0]
+	}
 	force, _ := cmd.Flags().GetBool("force")
 
 	if force {
@@ -122,11 +125,4 @@ func cleanAll() error {
 	}
 	ui.Success("Removed %d version(s)", len(versions))
 	return nil
-}
-
-func firstOr(s []string, def string) string {
-	if len(s) > 0 {
-		return s[0]
-	}
-	return def
 }

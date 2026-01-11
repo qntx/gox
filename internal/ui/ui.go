@@ -168,7 +168,7 @@ func (t *Table) Render() {
 				sb.WriteString("  ")
 			}
 			if i < len(t.widths) {
-				sb.WriteString(fmt.Sprintf("%-*s", t.widths[i], col))
+				fmt.Fprintf(&sb, "%-*s", t.widths[i], col)
 			} else {
 				sb.WriteString(col)
 			}
