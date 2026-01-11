@@ -1,8 +1,8 @@
 # gox
 
-CGO cross-compilation powered by Zig.
+**CGO cross-compilation powered by Zig.**
 
-Cross-compile Go programs with C dependencies to any platform without installing platform-specific toolchains, Docker containers, or complex build configurations.
+Cross-compile Go programs with C dependencies to any platform—without installing platform-specific toolchains, Docker containers, or complex build configurations. `gox` leverages [Zig](https://ziglang.org/)'s hermetic C/C++ compiler to provide a seamless cross-compilation experience.
 
 ## Features
 
@@ -55,6 +55,8 @@ gox build --os windows --arch amd64 --prefix ./dist --pack
 # parallel builds
 gox build -j
 ```
+
+See examples in the [examples](./examples) directory.
 
 ## Configuration
 

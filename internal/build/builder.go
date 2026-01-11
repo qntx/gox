@@ -204,7 +204,7 @@ func (b *Builder) zigCC(mode, target string) string {
 }
 
 func (b *Builder) cgoFlags() string {
-	flags := []string{"-fno-sanitize=all", "-Wno-macro-redefined"}
+	flags := []string{"-Wno-unused-command-line-argument", "-fno-sanitize=all", "-Wno-macro-redefined"}
 	for _, d := range b.opts.IncludeDirs {
 		flags = append(flags, "-I"+d)
 	}
