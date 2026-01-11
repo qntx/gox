@@ -26,6 +26,7 @@ type Options struct {
 	BuildFlags  []string
 	NoRpath     bool
 	Pack        bool
+	Strip       bool
 	Verbose     bool
 }
 

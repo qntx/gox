@@ -56,6 +56,7 @@ func init() {
 	f.StringSliceVar(&flags.opts.BuildFlags, "flags", nil, "additional build flags")
 	f.BoolVar(&flags.opts.NoRpath, "no-rpath", false, "disable rpath")
 	f.BoolVar(&flags.opts.Pack, "pack", false, "create archive")
+	f.BoolVarP(&flags.opts.Strip, "strip", "s", false, "strip symbols (-ldflags=\"-s -w\")")
 	f.BoolVarP(&flags.opts.Verbose, "verbose", "v", false, "verbose output")
 	f.BoolVarP(&flags.parallel, "parallel", "j", false, "parallel builds")
 
@@ -231,6 +232,9 @@ func applyFlagOverrides(cmd *cobra.Command, o *build.Options) {
 	}
 	if changed("pack") {
 		o.Pack = flags.opts.Pack
+	}
+	if changed("strip") {
+		o.Strip = flags.opts.Strip
 	}
 	if changed("verbose") {
 		o.Verbose = flags.opts.Verbose

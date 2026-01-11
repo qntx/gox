@@ -24,6 +24,7 @@ type ConfigDefault struct {
 	Link       []string `toml:"link"`
 	Packages   []string `toml:"packages"`
 	Flags      []string `toml:"flags"`
+	Strip      bool     `toml:"strip"`
 	Verbose    bool     `toml:"verbose"`
 }
 
@@ -43,6 +44,7 @@ type ConfigTarget struct {
 	Flags      []string `toml:"flags"`
 	NoRpath    bool     `toml:"no-rpath"`
 	Pack       bool     `toml:"pack"`
+	Strip      bool     `toml:"strip"`
 	Verbose    bool     `toml:"verbose"`
 }
 
@@ -120,6 +122,7 @@ func (c *Config) defaultOptions() *Options {
 		Libs:        append([]string(nil), d.Link...),
 		Packages:    append([]string(nil), d.Packages...),
 		BuildFlags:  append([]string(nil), d.Flags...),
+		Strip:       d.Strip,
 		Verbose:     d.Verbose,
 	}
 }
@@ -147,6 +150,7 @@ func (c *Config) mergeOptions(t *ConfigTarget) *Options {
 		BuildFlags:  mergeSlices(d.Flags, t.Flags),
 		NoRpath:     t.NoRpath,
 		Pack:        t.Pack,
+		Strip:       d.Strip || t.Strip,
 		Verbose:     d.Verbose || t.Verbose,
 	}
 }

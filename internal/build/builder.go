@@ -230,7 +230,9 @@ func (b *Builder) cgoLDFlags() string {
 
 func (b *Builder) goLDFlags() string {
 	var flags []string
-	if b.opts.GOOS == "darwin" && runtime.GOOS != "darwin" {
+	if b.opts.Strip {
+		flags = append(flags, "-s", "-w")
+	} else if b.opts.GOOS == "darwin" && runtime.GOOS != "darwin" {
 		flags = append(flags, "-w")
 	}
 	switch b.opts.LinkMode {
