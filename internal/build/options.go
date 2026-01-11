@@ -41,6 +41,7 @@ type Options struct {
 	// Dependencies
 	IncludeDirs []string
 	LibDirs     []string
+	BinDirs     []string // Windows DLL directories
 	Libs        []string
 	Packages    []string
 

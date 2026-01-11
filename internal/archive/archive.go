@@ -173,7 +173,20 @@ func zipPrefix(files []*zip.File) string {
 	if len(files) == 0 {
 		return ""
 	}
-	return strings.SplitN(files[0].Name, "/", 2)[0] + "/"
+	// Get first directory component from first file
+	first := strings.SplitN(files[0].Name, "/", 2)[0]
+	if first == "" {
+		return ""
+	}
+	prefix := first + "/"
+
+	// Only strip if ALL files share this common root directory
+	for _, f := range files {
+		if !strings.HasPrefix(f.Name, prefix) {
+			return "" // Multiple top-level dirs, don't strip
+		}
+	}
+	return prefix
 }
 
 func unzipEntry(f *zip.File, dst, strip string) error {
@@ -228,14 +241,31 @@ func untar(src, dst string, decomp func(io.Reader) (io.Reader, error)) error {
 }
 
 func tarPrefix(tr *tar.Reader) (string, error) {
-	hdr, err := tr.Next()
-	if err == io.EOF {
-		return "", nil
+	var prefix string
+	first := true
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+
+		dir := strings.SplitN(hdr.Name, "/", 2)[0]
+		if dir == "" {
+			continue
+		}
+
+		if first {
+			prefix = dir + "/"
+			first = false
+		} else if !strings.HasPrefix(hdr.Name, prefix) {
+			return "", nil // Multiple top-level dirs, don't strip
+		}
 	}
-	if err != nil {
-		return "", err
-	}
-	return strings.SplitN(hdr.Name, "/", 2)[0] + "/", nil
+	return prefix, nil
 }
 
 type link struct{ target, path string }

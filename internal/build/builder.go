@@ -61,9 +61,10 @@ func (b *Builder) setupPackages(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	inc, lib := CollectPaths(pkgs)
+	inc, lib, bin := CollectPaths(pkgs)
 	b.opts.IncludeDirs = append(inc, b.opts.IncludeDirs...)
 	b.opts.LibDirs = append(lib, b.opts.LibDirs...)
+	b.opts.BinDirs = append(bin, b.opts.BinDirs...)
 	return nil
 }
 
@@ -77,7 +78,8 @@ func (b *Builder) setupDirs() error {
 			return err
 		}
 	}
-	if b.opts.Prefix != "" {
+	// Windows uses flat structure, others use bin/lib structure
+	if b.opts.Prefix != "" && b.opts.GOOS != "windows" {
 		return os.MkdirAll(filepath.Join(b.opts.Prefix, "lib"), 0o755)
 	}
 	return nil
@@ -107,7 +109,28 @@ func (b *Builder) build(ctx context.Context, pkgs []string) error {
 }
 
 func (b *Builder) copyLibs() error {
-	if b.opts.Prefix == "" || b.opts.LinkMode.IsStatic() || len(b.opts.LibDirs) == 0 {
+	if b.opts.Prefix == "" || b.opts.LinkMode.IsStatic() {
+		return nil
+	}
+
+	if b.opts.GOOS == "windows" {
+		// Windows: copy DLLs from bin directories to prefix (flat, alongside exe)
+		if len(b.opts.BinDirs) == 0 {
+			return nil
+		}
+		for _, src := range b.opts.BinDirs {
+			if err := cpDir(src, b.opts.Prefix); err != nil {
+				return fmt.Errorf("%s: %w", src, err)
+			}
+		}
+		if b.opts.Verbose {
+			fmt.Fprintf(os.Stderr, "dlls: %s\n", b.opts.Prefix)
+		}
+		return nil
+	}
+
+	// Unix: copy shared libs to prefix/lib
+	if len(b.opts.LibDirs) == 0 {
 		return nil
 	}
 	dst := filepath.Join(b.opts.Prefix, "lib")
@@ -244,8 +267,11 @@ func (b *Builder) output() string {
 	}
 	name := filepath.Base(b.opts.Prefix)
 	if b.opts.GOOS == "windows" {
+		// Windows: flat structure (exe directly in prefix)
 		name += ".exe"
+		return filepath.Join(b.opts.Prefix, name)
 	}
+	// Unix: bin/lib structure
 	return filepath.Join(b.opts.Prefix, "bin", name)
 }
 

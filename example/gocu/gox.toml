@@ -1,6 +1,8 @@
 [default]
 zig-version = "0.15.2"
 verbose = false
+link = ["cudart", "cublas"]
+flags = ["-tags=cuda"]
 
 [[target]]
 name = "linux-cuda"
@@ -11,9 +13,7 @@ packages = [
   "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/linux-x86_64/cuda_cudart-linux-x86_64-12.9.79-archive.tar.xz",
   "https://developer.download.nvidia.com/compute/cuda/redist/libcublas/linux-x86_64/libcublas-linux-x86_64-12.9.1.4-archive.tar.xz"
 ]
-link = ["cudart", "cublas"]
 prefix = "./gemm"
-flags = ["-tags=cuda"]
 
 [[target]]
 name = "windows-cuda"
@@ -23,6 +23,4 @@ packages = [
   "gocnn-lib/cudart@v12.9.79/windows-amd64.zip",
   "https://developer.download.nvidia.com/compute/cuda/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-12.9.1.4-archive.zip",
 ]
-link = ["cudart", "cublas"]
 prefix = "./gemm-win"
-flags = ["-tags=cuda"]

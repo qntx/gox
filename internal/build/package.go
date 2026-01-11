@@ -24,6 +24,7 @@ type Package struct {
 	Dir     string
 	Include string
 	Lib     string
+	Bin     string // Windows DLLs directory
 }
 
 var ghReleaseRE = regexp.MustCompile(`^([^/]+)/([^@]+)@([^/]+)/(.+)$`)
@@ -56,6 +57,7 @@ func (p *Package) EnsureWithProgress(ctx context.Context, bar *ui.Bar) error {
 	dir := filepath.Join(pkgCache(), p.Dir)
 	p.Include = filepath.Join(dir, "include")
 	p.Lib = filepath.Join(dir, "lib")
+	p.Bin = filepath.Join(dir, "bin")
 
 	if isDir(dir) {
 		if bar != nil {
@@ -113,6 +115,7 @@ func EnsureAll(ctx context.Context, sources []string) ([]*Package, error) {
 		} else {
 			p.Include = filepath.Join(dir, "include")
 			p.Lib = filepath.Join(dir, "lib")
+			p.Bin = filepath.Join(dir, "bin")
 		}
 	}
 
@@ -160,15 +163,18 @@ func EnsureAll(ctx context.Context, sources []string) ([]*Package, error) {
 	return pkgs, nil
 }
 
-// CollectPaths returns include and lib directories.
+// CollectPaths returns include, lib, and bin directories.
 // Handles Windows SDK convention: lib/x64, lib/Win32, etc.
-func CollectPaths(pkgs []*Package) (inc, lib []string) {
+func CollectPaths(pkgs []*Package) (inc, lib, bin []string) {
 	for _, p := range pkgs {
 		if isDir(p.Include) {
 			inc = append(inc, p.Include)
 		}
 		if isDir(p.Lib) {
 			lib = append(lib, resolveLibDir(p.Lib))
+		}
+		if isDir(p.Bin) {
+			bin = append(bin, p.Bin)
 		}
 	}
 	return
