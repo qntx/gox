@@ -224,54 +224,32 @@ func untar(src, dst string, decomp func(io.Reader) (io.Reader, error)) error {
 		return err
 	}
 
-	strip, err := tarPrefix(tar.NewReader(dr))
-	if err != nil {
-		return err
-	}
-
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-	dr, err = decomp(f)
-	if err != nil {
-		return err
-	}
-
-	return untarAll(tar.NewReader(dr), dst, strip)
-}
-
-func tarPrefix(tr *tar.Reader) (string, error) {
-	var prefix string
-	first := true
-
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return "", err
-		}
-
-		dir := strings.SplitN(hdr.Name, "/", 2)[0]
-		if dir == "" {
-			continue
-		}
-
-		if first {
-			prefix = dir + "/"
-			first = false
-		} else if !strings.HasPrefix(hdr.Name, prefix) {
-			return "", nil // Multiple top-level dirs, don't strip
-		}
-	}
-	return prefix, nil
+	// Single-pass extraction: detect prefix while extracting
+	return untarSinglePass(tar.NewReader(dr), dst)
 }
 
 type link struct{ target, path string }
 
-func untarAll(tr *tar.Reader, dst, strip string) error {
-	var links []link
+type bufferedEntry struct {
+	hdr  tar.Header
+	data []byte // nil for directories/symlinks
+}
+
+// untarSinglePass extracts tar in one pass, detecting common prefix on-the-fly.
+// Buffers first few small entries to detect prefix, then streams the rest.
+func untarSinglePass(tr *tar.Reader, dst string) error {
+	var (
+		prefix    string
+		confirmed bool
+		links     []link
+		buffered  []bufferedEntry
+		dirCache  = make(map[string]struct{}, 64) // Cache created directories
+	)
+
+	const (
+		maxBufferEntries = 5
+		maxBufferSize    = 1 << 20 // 1MB max per buffered file
+	)
 
 	for {
 		hdr, err := tr.Next()
@@ -282,32 +260,160 @@ func untarAll(tr *tar.Reader, dst, strip string) error {
 			return err
 		}
 
-		name := strings.TrimPrefix(hdr.Name, strip)
-		if name == "" {
-			continue
+		// Phase 1: Buffer first few entries to detect prefix
+		if !confirmed {
+			dir := strings.SplitN(hdr.Name, "/", 2)[0]
+			if dir != "" {
+				if prefix == "" {
+					prefix = dir + "/"
+				} else if !strings.HasPrefix(hdr.Name, prefix) {
+					// Multiple top-level dirs - flush without stripping
+					prefix = ""
+					confirmed = true
+					for _, b := range buffered {
+						if err := extractBuffered(&b, dst, "", &links, dirCache); err != nil {
+							return err
+						}
+					}
+					buffered = nil
+				}
+			}
+
+			// Buffer small entries, stream large ones
+			if !confirmed && hdr.Size <= maxBufferSize {
+				entry := bufferedEntry{hdr: *hdr}
+				if hdr.Typeflag == tar.TypeReg {
+					entry.data, err = io.ReadAll(tr)
+					if err != nil {
+						return err
+					}
+				}
+				buffered = append(buffered, entry)
+
+				if len(buffered) >= maxBufferEntries {
+					// Confirm prefix and flush buffer
+					confirmed = true
+					for _, b := range buffered {
+						if err := extractBuffered(&b, dst, prefix, &links, dirCache); err != nil {
+							return err
+						}
+					}
+					buffered = nil
+				}
+				continue
+			}
+
+			// Large file encountered - flush buffer and confirm
+			confirmed = true
+			for _, b := range buffered {
+				if err := extractBuffered(&b, dst, prefix, &links, dirCache); err != nil {
+					return err
+				}
+			}
+			buffered = nil
 		}
 
-		p, err := safe(dst, name)
-		if err != nil {
+		// Phase 2: Stream extract directly
+		if err := streamExtract(tr, hdr, dst, prefix, &links, dirCache); err != nil {
 			return err
 		}
+	}
 
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(p, perm); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			if err := write(p, tr, os.FileMode(hdr.Mode)); err != nil {
-				return err
-			}
-		case tar.TypeSymlink:
-			if err := mklink(hdr.Linkname, p); err != nil {
-				links = append(links, link{hdr.Linkname, p})
-			}
+	// Flush remaining buffered entries
+	for _, b := range buffered {
+		if err := extractBuffered(&b, dst, prefix, &links, dirCache); err != nil {
+			return err
 		}
 	}
+
 	return resolveLinks(links)
+}
+
+func extractBuffered(entry *bufferedEntry, dst, strip string, links *[]link, dirCache map[string]struct{}) error {
+	name := strings.TrimPrefix(entry.hdr.Name, strip)
+	if name == "" {
+		return nil
+	}
+
+	p, err := safe(dst, name)
+	if err != nil {
+		return err
+	}
+
+	switch entry.hdr.Typeflag {
+	case tar.TypeDir:
+		dirCache[p] = struct{}{}
+		return os.MkdirAll(p, perm)
+	case tar.TypeReg:
+		if err := mkdirCached(filepath.Dir(p), dirCache); err != nil {
+			return err
+		}
+		return os.WriteFile(p, entry.data, os.FileMode(entry.hdr.Mode))
+	case tar.TypeSymlink:
+		if err := mklink(entry.hdr.Linkname, p); err != nil {
+			*links = append(*links, link{entry.hdr.Linkname, p})
+		}
+	}
+	return nil
+}
+
+// streamExtract writes file directly to disk without buffering in memory.
+func streamExtract(tr *tar.Reader, hdr *tar.Header, dst, strip string, links *[]link, dirCache map[string]struct{}) error {
+	name := strings.TrimPrefix(hdr.Name, strip)
+	if name == "" {
+		return nil
+	}
+
+	p, err := safe(dst, name)
+	if err != nil {
+		return err
+	}
+
+	switch hdr.Typeflag {
+	case tar.TypeDir:
+		dirCache[p] = struct{}{}
+		return os.MkdirAll(p, perm)
+
+	case tar.TypeReg:
+		if err := mkdirCached(filepath.Dir(p), dirCache); err != nil {
+			return err
+		}
+		return streamToFile(tr, p, os.FileMode(hdr.Mode))
+
+	case tar.TypeSymlink:
+		if err := mklink(hdr.Linkname, p); err != nil {
+			*links = append(*links, link{hdr.Linkname, p})
+		}
+	}
+	return nil
+}
+
+// streamToFile streams data directly to file with buffered I/O.
+func streamToFile(r io.Reader, path string, mode os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+
+	// Use 256KB buffer for optimal disk I/O
+	buf := make([]byte, 256*1024)
+	_, err = io.CopyBuffer(f, r, buf)
+	if e := f.Close(); err == nil {
+		err = e
+	}
+	return err
+}
+
+// mkdirCached creates directory only if not already cached, reducing syscalls.
+func mkdirCached(dir string, cache map[string]struct{}) error {
+	if _, ok := cache[dir]; ok {
+		return nil
+	}
+	if err := os.MkdirAll(dir, perm); err != nil {
+		return err
+	}
+	cache[dir] = struct{}{}
+	return nil
 }
 
 func mklink(target, path string) error {
@@ -509,7 +615,7 @@ func write(path string, r io.Reader, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(f, r)
+	_, err = io.CopyBuffer(f, r, make([]byte, 256*1024))
 	if e := f.Close(); err == nil {
 		err = e
 	}
@@ -536,7 +642,7 @@ func copyTo(w io.Writer, path string) error {
 		return err
 	}
 	defer f.Close()
-	_, err = io.Copy(w, f)
+	_, err = io.CopyBuffer(w, f, make([]byte, 256*1024))
 	return err
 }
 
@@ -545,7 +651,7 @@ func fetchToReader(path string, r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(f, r)
+	_, err = io.CopyBuffer(f, r, make([]byte, 256*1024))
 	if e := f.Close(); err == nil {
 		err = e
 	}
