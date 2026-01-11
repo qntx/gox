@@ -7,52 +7,54 @@ import (
 	"runtime"
 )
 
-// LinkMode specifies how to link the binary.
+// ----------------------------------------------------------------------------
+// LinkMode
+// ----------------------------------------------------------------------------
+
+// LinkMode specifies binary linking strategy.
 type LinkMode string
 
 const (
-	LinkModeAuto    LinkMode = "auto"
-	LinkModeStatic  LinkMode = "static"
-	LinkModeDynamic LinkMode = "dynamic"
+	LinkAuto    LinkMode = "auto"
+	LinkStatic  LinkMode = "static"
+	LinkDynamic LinkMode = "dynamic"
 )
 
-var validLinkModes = map[LinkMode]bool{
-	LinkModeAuto: true, LinkModeStatic: true, LinkModeDynamic: true,
+func (m LinkMode) Valid() bool {
+	return m == LinkAuto || m == LinkStatic || m == LinkDynamic
 }
 
-func (m LinkMode) Valid() bool { return validLinkModes[m] }
+func (m LinkMode) IsStatic() bool { return m == LinkStatic }
 
-func (m LinkMode) IsStatic() bool { return m == LinkModeStatic }
-
-// Zig target mappings
-var (
-	zigArch = map[string]string{
-		"amd64": "x86_64", "386": "x86", "arm64": "aarch64",
-		"arm": "arm", "riscv64": "riscv64", "loong64": "loongarch64",
-		"ppc64le": "powerpc64le", "s390x": "s390x",
-	}
-	zigOS = map[string]string{
-		"linux": "linux-gnu", "darwin": "macos", "windows": "windows-gnu",
-		"freebsd": "freebsd", "netbsd": "netbsd",
-	}
-)
+// ----------------------------------------------------------------------------
+// Options
+// ----------------------------------------------------------------------------
 
 // Options configures a build operation.
 type Options struct {
-	GOOS        string
-	GOARCH      string
-	Output      string
-	Prefix      string
-	ZigVersion  string
+	// Platform
+	GOOS   string
+	GOARCH string
+
+	// Output
+	Output  string
+	Prefix  string
+	NoRpath bool
+	Pack    bool
+
+	// Toolchain
+	ZigVersion string
+	LinkMode   LinkMode
+
+	// Dependencies
 	IncludeDirs []string
 	LibDirs     []string
 	Libs        []string
 	Packages    []string
-	BuildFlags  []string
-	LinkMode    LinkMode
-	NoRpath     bool
-	Pack        bool
-	Verbose     bool
+
+	// Build
+	BuildFlags []string
+	Verbose    bool
 }
 
 // Normalize applies defaults for unset fields.
@@ -64,7 +66,7 @@ func (o *Options) Normalize() {
 		o.GOARCH = runtime.GOARCH
 	}
 	if o.LinkMode == "" {
-		o.LinkMode = LinkModeAuto
+		o.LinkMode = LinkAuto
 	}
 	if o.Prefix != "" {
 		o.Prefix = filepath.Clean(o.Prefix)
@@ -74,10 +76,10 @@ func (o *Options) Normalize() {
 // Validate checks option constraints.
 func (o *Options) Validate() error {
 	if !o.LinkMode.Valid() {
-		return fmt.Errorf("invalid linkmode %q: must be auto, static, or dynamic", o.LinkMode)
+		return fmt.Errorf("invalid linkmode: %q", o.LinkMode)
 	}
 	if o.Output != "" && o.Prefix != "" {
-		return errors.New("cannot specify both --output and --prefix")
+		return errors.New("--output and --prefix are mutually exclusive")
 	}
 	if o.NoRpath && o.Prefix == "" {
 		return errors.New("--no-rpath requires --prefix")
@@ -88,21 +90,45 @@ func (o *Options) Validate() error {
 	return nil
 }
 
+// ----------------------------------------------------------------------------
+// Zig Target
+// ----------------------------------------------------------------------------
+
+var (
+	zigArch = map[string]string{
+		"amd64":   "x86_64",
+		"386":     "x86",
+		"arm64":   "aarch64",
+		"arm":     "arm",
+		"riscv64": "riscv64",
+		"loong64": "loongarch64",
+		"ppc64le": "powerpc64le",
+		"s390x":   "s390x",
+	}
+	zigOS = map[string]string{
+		"linux":   "linux-gnu",
+		"darwin":  "macos",
+		"windows": "windows-gnu",
+		"freebsd": "freebsd",
+		"netbsd":  "netbsd",
+	}
+)
+
 // ZigTarget returns the Zig cross-compilation target string.
 func (o *Options) ZigTarget() string {
-	return o.zigArch() + "-" + o.zigOSTarget()
+	return o.resolveArch() + "-" + o.resolveOS()
 }
 
-func (o *Options) zigArch() string {
+func (o *Options) resolveArch() string {
 	if v, ok := zigArch[o.GOARCH]; ok {
 		return v
 	}
 	return o.GOARCH
 }
 
-func (o *Options) zigOSTarget() string {
+func (o *Options) resolveOS() string {
 	if o.GOOS == "linux" {
-		return o.linuxTarget()
+		return o.linuxABI()
 	}
 	if v, ok := zigOS[o.GOOS]; ok {
 		return v
@@ -110,16 +136,14 @@ func (o *Options) zigOSTarget() string {
 	return o.GOOS
 }
 
-func (o *Options) linuxTarget() string {
-	isArm := o.GOARCH == "arm"
-	isStatic := o.LinkMode.IsStatic()
-
+func (o *Options) linuxABI() string {
+	arm, static := o.GOARCH == "arm", o.LinkMode.IsStatic()
 	switch {
-	case isArm && isStatic:
+	case arm && static:
 		return "linux-musleabihf"
-	case isArm:
+	case arm:
 		return "linux-gnueabihf"
-	case isStatic:
+	case static:
 		return "linux-musl"
 	default:
 		return "linux-gnu"

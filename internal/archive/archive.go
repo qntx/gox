@@ -16,69 +16,78 @@ import (
 	"github.com/ulikunitz/xz"
 )
 
+// ----------------------------------------------------------------------------
+// Constants & Errors
+// ----------------------------------------------------------------------------
+
 const (
-	defaultPerm     = 0o755
-	maxSymlinkDepth = 10
+	perm         = 0o755
+	maxLinkDepth = 10
 )
 
-var ErrPathTraversal = errors.New("path traversal detected")
+var ErrPathTraversal = errors.New("path traversal")
+
+// ----------------------------------------------------------------------------
+// Format
+// ----------------------------------------------------------------------------
 
 // Format represents an archive format.
 type Format int
 
 const (
-	FormatTarGz Format = iota
-	FormatTarXz
-	FormatZip
+	TarGz Format = iota
+	TarXz
+	Zip
 )
 
 func (f Format) Ext() string {
 	return [...]string{".tar.gz", ".tar.xz", ".zip"}[f]
 }
 
-// DetectFormat determines archive format from filename or URL.
-func DetectFormat(name string) Format {
-	lower := strings.ToLower(name)
+// Detect determines format from filename.
+func Detect(name string) Format {
+	s := strings.ToLower(name)
 	switch {
-	case strings.HasSuffix(lower, ".zip"):
-		return FormatZip
-	case strings.HasSuffix(lower, ".tar.xz"), strings.HasSuffix(lower, ".txz"):
-		return FormatTarXz
+	case strings.HasSuffix(s, ".zip"):
+		return Zip
+	case strings.HasSuffix(s, ".tar.xz"), strings.HasSuffix(s, ".txz"):
+		return TarXz
 	default:
-		return FormatTarGz
+		return TarGz
 	}
 }
 
-// FormatForOS returns the preferred archive format for a target OS.
-func FormatForOS(goos string) Format {
+// ForOS returns preferred format for OS.
+func ForOS(goos string) Format {
 	if goos == "windows" {
-		return FormatZip
+		return Zip
 	}
-	return FormatTarGz
+	return TarGz
 }
 
-// Extract extracts an archive to destDir, auto-stripping top-level directory.
-func Extract(archivePath, destDir string) error {
-	switch DetectFormat(archivePath) {
-	case FormatZip:
-		return extractZip(archivePath, destDir)
-	case FormatTarXz:
-		return extractTar(archivePath, destDir, newXzReader)
+// ----------------------------------------------------------------------------
+// Public API
+// ----------------------------------------------------------------------------
+
+// Extract extracts archive to destDir, stripping top-level directory.
+func Extract(src, dst string) error {
+	switch Detect(src) {
+	case Zip:
+		return unzip(src, dst)
+	case TarXz:
+		return untar(src, dst, xzReader)
 	default:
-		return extractTar(archivePath, destDir, newGzipReader)
+		return untar(src, dst, gzReader)
 	}
 }
 
-func newGzipReader(r io.Reader) (io.Reader, error) { return gzip.NewReader(r) }
-func newXzReader(r io.Reader) (io.Reader, error)   { return xz.NewReader(r) }
-
-// Download fetches URL, extracts to destDir, shows progress on stderr.
-func Download(ctx context.Context, url, destDir string) error {
-	return DownloadWithProgress(ctx, url, destDir, os.Stderr)
+// Download fetches URL, extracts to destDir.
+func Download(ctx context.Context, url, dst string) error {
+	return DownloadProgress(ctx, url, dst, os.Stderr)
 }
 
-// DownloadWithProgress downloads and extracts with optional progress output.
-func DownloadWithProgress(ctx context.Context, url, destDir string, w io.Writer) error {
+// DownloadProgress downloads with progress output.
+func DownloadProgress(ctx context.Context, url, dst string, w io.Writer) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -86,22 +95,22 @@ func DownloadWithProgress(ctx context.Context, url, destDir string, w io.Writer)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("download: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download: HTTP %d", resp.StatusCode)
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	tmpDir, err := os.MkdirTemp("", "gox-*")
+	tmp, err := os.MkdirTemp("", "gox-*")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tmpDir)
+	defer os.RemoveAll(tmp)
 
-	tmpFile := filepath.Join(tmpDir, "archive"+DetectFormat(url).Ext())
-	if err := downloadToFile(tmpFile, resp.Body, resp.ContentLength, w); err != nil {
+	file := filepath.Join(tmp, "archive"+Detect(url).Ext())
+	if err := fetch(file, resp.Body, resp.ContentLength, w); err != nil {
 		return err
 	}
 
@@ -109,72 +118,80 @@ func DownloadWithProgress(ctx context.Context, url, destDir string, w io.Writer)
 		fmt.Fprintln(w, "\nextracting...")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(destDir), defaultPerm); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), perm); err != nil {
 		return err
 	}
-	return Extract(tmpFile, destDir)
+	return Extract(file, dst)
 }
 
-// Create creates an archive from src for the given OS/arch.
+// Create creates archive from src for OS/arch.
 func Create(src, goos, goarch string) (string, error) {
 	info, err := os.Stat(src)
 	if err != nil {
 		return "", err
 	}
 
-	format := FormatForOS(goos)
-	dest := filepath.Join(
+	f := ForOS(goos)
+	dst := filepath.Join(
 		filepath.Dir(src),
-		fmt.Sprintf("%s-%s-%s%s", filepath.Base(src), goos, goarch, format.Ext()),
+		fmt.Sprintf("%s-%s-%s%s", filepath.Base(src), goos, goarch, f.Ext()),
 	)
 
-	if format == FormatZip {
-		err = createZip(src, dest, info.IsDir())
+	if f == Zip {
+		err = mkzip(src, dst, info.IsDir())
 	} else {
-		err = createTarGz(src, dest, info.IsDir())
+		err = mktgz(src, dst, info.IsDir())
 	}
-	if err != nil {
-		return "", err
-	}
-	return dest, nil
+	return dst, err
 }
 
-func extractZip(archivePath, destDir string) error {
-	r, err := zip.OpenReader(archivePath)
+// ----------------------------------------------------------------------------
+// Decompressors
+// ----------------------------------------------------------------------------
+
+func gzReader(r io.Reader) (io.Reader, error) { return gzip.NewReader(r) }
+func xzReader(r io.Reader) (io.Reader, error) { return xz.NewReader(r) }
+
+// ----------------------------------------------------------------------------
+// Zip Extraction
+// ----------------------------------------------------------------------------
+
+func unzip(src, dst string) error {
+	r, err := zip.OpenReader(src)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
 
-	strip := zipStripPrefix(r.File)
+	strip := zipPrefix(r.File)
 	for _, f := range r.File {
-		if err := extractZipEntry(f, destDir, strip); err != nil {
+		if err := unzipEntry(f, dst, strip); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func zipStripPrefix(files []*zip.File) string {
+func zipPrefix(files []*zip.File) string {
 	if len(files) == 0 {
 		return ""
 	}
 	return strings.SplitN(files[0].Name, "/", 2)[0] + "/"
 }
 
-func extractZipEntry(f *zip.File, destDir, strip string) error {
+func unzipEntry(f *zip.File, dst, strip string) error {
 	name := strings.TrimPrefix(f.Name, strip)
 	if name == "" {
 		return nil
 	}
 
-	path, err := safePath(destDir, name)
+	p, err := safe(dst, name)
 	if err != nil {
 		return err
 	}
 
 	if f.FileInfo().IsDir() {
-		return os.MkdirAll(path, defaultPerm)
+		return os.MkdirAll(p, perm)
 	}
 
 	rc, err := f.Open()
@@ -182,39 +199,42 @@ func extractZipEntry(f *zip.File, destDir, strip string) error {
 		return err
 	}
 	defer rc.Close()
-	return writeFile(path, rc, f.Mode())
+	return write(p, rc, f.Mode())
 }
 
-func extractTar(archivePath, destDir string, decompress func(io.Reader) (io.Reader, error)) error {
-	f, err := os.Open(archivePath)
+// ----------------------------------------------------------------------------
+// Tar Extraction
+// ----------------------------------------------------------------------------
+
+func untar(src, dst string, decomp func(io.Reader) (io.Reader, error)) error {
+	f, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	dr, err := decompress(f)
-	if err != nil {
-		return fmt.Errorf("decompress: %w", err)
-	}
-
-	strip, err := tarStripPrefix(tar.NewReader(dr))
+	dr, err := decomp(f)
 	if err != nil {
 		return err
 	}
 
-	// Rewind for second pass
+	strip, err := tarPrefix(tar.NewReader(dr))
+	if err != nil {
+		return err
+	}
+
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	dr, err = decompress(f)
+	dr, err = decomp(f)
 	if err != nil {
-		return fmt.Errorf("decompress: %w", err)
+		return err
 	}
 
-	return processTar(tar.NewReader(dr), destDir, strip)
+	return untarAll(tar.NewReader(dr), dst, strip)
 }
 
-func tarStripPrefix(tr *tar.Reader) (string, error) {
+func tarPrefix(tr *tar.Reader) (string, error) {
 	hdr, err := tr.Next()
 	if err == io.EOF {
 		return "", nil
@@ -225,12 +245,10 @@ func tarStripPrefix(tr *tar.Reader) (string, error) {
 	return strings.SplitN(hdr.Name, "/", 2)[0] + "/", nil
 }
 
-type pendingSymlink struct {
-	linkname, path string
-}
+type link struct{ target, path string }
 
-func processTar(tr *tar.Reader, destDir, strip string) error {
-	var symlinks []pendingSymlink
+func untarAll(tr *tar.Reader, dst, strip string) error {
+	var links []link
 
 	for {
 		hdr, err := tr.Next()
@@ -246,73 +264,72 @@ func processTar(tr *tar.Reader, destDir, strip string) error {
 			continue
 		}
 
-		path, err := safePath(destDir, name)
+		p, err := safe(dst, name)
 		if err != nil {
 			return err
 		}
 
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(path, defaultPerm); err != nil {
+			if err := os.MkdirAll(p, perm); err != nil {
 				return err
 			}
 		case tar.TypeReg:
-			if err := writeFile(path, tr, os.FileMode(hdr.Mode)); err != nil {
+			if err := write(p, tr, os.FileMode(hdr.Mode)); err != nil {
 				return err
 			}
 		case tar.TypeSymlink:
-			if err := symlink(hdr.Linkname, path); err != nil {
-				// Windows: defer symlink resolution
-				symlinks = append(symlinks, pendingSymlink{hdr.Linkname, path})
+			if err := mklink(hdr.Linkname, p); err != nil {
+				links = append(links, link{hdr.Linkname, p})
 			}
 		}
 	}
-	return resolveSymlinks(symlinks)
+	return resolveLinks(links)
 }
 
-func symlink(target, path string) error {
+func mklink(target, path string) error {
 	_ = os.Remove(path)
 	return os.Symlink(target, path)
 }
 
-func resolveSymlinks(symlinks []pendingSymlink) error {
-	if len(symlinks) == 0 {
+func resolveLinks(links []link) error {
+	if len(links) == 0 {
 		return nil
 	}
 
-	// Build path -> linkname map for chain resolution
-	linkMap := make(map[string]string, len(symlinks))
-	for _, sl := range symlinks {
-		linkMap[sl.path] = sl.linkname
+	m := make(map[string]string, len(links))
+	for _, l := range links {
+		m[l.path] = l.target
 	}
 
-	for _, sl := range symlinks {
-		target := resolveChain(sl.path, sl.linkname, linkMap)
-		// Skip if target doesn't exist (external dependency)
-		if _, err := os.Stat(target); err != nil {
+	for _, l := range links {
+		t := resolve(l.path, l.target, m)
+		if _, err := os.Stat(t); err != nil {
 			continue
 		}
-		if err := copyFile(target, sl.path); err != nil {
-			continue // Non-fatal: skip broken symlinks
-		}
+		_ = cp(t, l.path)
 	}
 	return nil
 }
 
-func resolveChain(base, linkname string, linkMap map[string]string) string {
-	target := filepath.Join(filepath.Dir(base), linkname)
-	for range maxSymlinkDepth {
-		next, ok := linkMap[target]
+func resolve(base, name string, m map[string]string) string {
+	t := filepath.Join(filepath.Dir(base), name)
+	for range maxLinkDepth {
+		next, ok := m[t]
 		if !ok {
-			return target
+			return t
 		}
-		target = filepath.Join(filepath.Dir(target), next)
+		t = filepath.Join(filepath.Dir(t), next)
 	}
-	return target
+	return t
 }
 
-func createTarGz(src, dest string, isDir bool) error {
-	f, err := os.Create(dest)
+// ----------------------------------------------------------------------------
+// Archive Creation
+// ----------------------------------------------------------------------------
+
+func mktgz(src, dst string, isDir bool) error {
+	f, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
@@ -325,70 +342,70 @@ func createTarGz(src, dest string, isDir bool) error {
 	defer tw.Close()
 
 	if isDir {
-		return walkTar(tw, src)
+		return tarWalk(tw, src)
 	}
-	return addTarFile(tw, src, filepath.Base(src))
+	return tarAdd(tw, src, filepath.Base(src))
 }
 
-func walkTar(tw *tar.Writer, root string) error {
-	baseDir := filepath.Dir(root)
-	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+func tarWalk(tw *tar.Writer, root string) error {
+	base := filepath.Dir(root)
+	return filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
-		relPath, err := filepath.Rel(baseDir, path)
+		rel, err := filepath.Rel(base, p)
 		if err != nil {
 			return err
 		}
 
-		header, err := tar.FileInfoHeader(info, "")
+		hdr, err := tar.FileInfoHeader(info, "")
 		if err != nil {
 			return err
 		}
-		header.Name = filepath.ToSlash(relPath)
+		hdr.Name = filepath.ToSlash(rel)
 
 		if info.IsDir() {
-			header.Name += "/"
+			hdr.Name += "/"
 		} else if info.Mode()&os.ModeSymlink != 0 {
-			link, err := os.Readlink(path)
+			l, err := os.Readlink(p)
 			if err != nil {
 				return err
 			}
-			header.Linkname = link
-			header.Typeflag = tar.TypeSymlink
+			hdr.Linkname = l
+			hdr.Typeflag = tar.TypeSymlink
 		}
 
-		if err := tw.WriteHeader(header); err != nil {
+		if err := tw.WriteHeader(hdr); err != nil {
 			return err
 		}
 		if info.Mode().IsRegular() {
-			return copyToWriter(tw, path)
+			return copyTo(tw, p)
 		}
 		return nil
 	})
 }
 
-func addTarFile(tw *tar.Writer, src, name string) error {
+func tarAdd(tw *tar.Writer, src, name string) error {
 	info, err := os.Stat(src)
 	if err != nil {
 		return err
 	}
 
-	header, err := tar.FileInfoHeader(info, "")
+	hdr, err := tar.FileInfoHeader(info, "")
 	if err != nil {
 		return err
 	}
-	header.Name = name
+	hdr.Name = name
 
-	if err := tw.WriteHeader(header); err != nil {
+	if err := tw.WriteHeader(hdr); err != nil {
 		return err
 	}
-	return copyToWriter(tw, src)
+	return copyTo(tw, src)
 }
 
-func createZip(src, dest string, isDir bool) error {
-	f, err := os.Create(dest)
+func mkzip(src, dst string, isDir bool) error {
+	f, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
@@ -398,74 +415,78 @@ func createZip(src, dest string, isDir bool) error {
 	defer zw.Close()
 
 	if isDir {
-		return walkZip(zw, src)
+		return zipWalk(zw, src)
 	}
-	return addZipFile(zw, src, filepath.Base(src))
+	return zipAdd(zw, src, filepath.Base(src))
 }
 
-func walkZip(zw *zip.Writer, root string) error {
-	baseDir := filepath.Dir(root)
-	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+func zipWalk(zw *zip.Writer, root string) error {
+	base := filepath.Dir(root)
+	return filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
-		relPath, err := filepath.Rel(baseDir, path)
+		rel, err := filepath.Rel(base, p)
 		if err != nil {
 			return err
 		}
-		relPath = filepath.ToSlash(relPath)
+		rel = filepath.ToSlash(rel)
 
 		if info.IsDir() {
-			_, err := zw.Create(relPath + "/")
+			_, err := zw.Create(rel + "/")
 			return err
 		}
 
-		header, err := zip.FileInfoHeader(info)
+		hdr, err := zip.FileInfoHeader(info)
 		if err != nil {
 			return err
 		}
-		header.Name = relPath
-		header.Method = zip.Deflate
+		hdr.Name = rel
+		hdr.Method = zip.Deflate
 
-		w, err := zw.CreateHeader(header)
+		w, err := zw.CreateHeader(hdr)
 		if err != nil {
 			return err
 		}
-		return copyToWriter(w, path)
+		return copyTo(w, p)
 	})
 }
 
-func addZipFile(zw *zip.Writer, src, name string) error {
+func zipAdd(zw *zip.Writer, src, name string) error {
 	info, err := os.Stat(src)
 	if err != nil {
 		return err
 	}
 
-	header, err := zip.FileInfoHeader(info)
+	hdr, err := zip.FileInfoHeader(info)
 	if err != nil {
 		return err
 	}
-	header.Name = name
-	header.Method = zip.Deflate
+	hdr.Name = name
+	hdr.Method = zip.Deflate
 
-	w, err := zw.CreateHeader(header)
+	w, err := zw.CreateHeader(hdr)
 	if err != nil {
 		return err
 	}
-	return copyToWriter(w, src)
+	return copyTo(w, src)
 }
 
-func safePath(destDir, name string) (string, error) {
-	path := filepath.Join(destDir, name)
-	if !strings.HasPrefix(path, filepath.Clean(destDir)+string(os.PathSeparator)) {
+// ----------------------------------------------------------------------------
+// File Utilities
+// ----------------------------------------------------------------------------
+
+func safe(dst, name string) (string, error) {
+	p := filepath.Join(dst, name)
+	if !strings.HasPrefix(p, filepath.Clean(dst)+string(os.PathSeparator)) {
 		return "", fmt.Errorf("%w: %s", ErrPathTraversal, name)
 	}
-	return path, nil
+	return p, nil
 }
 
-func writeFile(path string, r io.Reader, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), defaultPerm); err != nil {
+func write(path string, r io.Reader, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), perm); err != nil {
 		return err
 	}
 
@@ -474,13 +495,13 @@ func writeFile(path string, r io.Reader, mode os.FileMode) error {
 		return err
 	}
 	_, err = io.Copy(f, r)
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
+	if e := f.Close(); err == nil {
+		err = e
 	}
 	return err
 }
 
-func copyFile(src, dst string) error {
+func cp(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -491,10 +512,10 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	return writeFile(dst, in, info.Mode())
+	return write(dst, in, info.Mode())
 }
 
-func copyToWriter(w io.Writer, path string) error {
+func copyTo(w io.Writer, path string) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -504,7 +525,7 @@ func copyToWriter(w io.Writer, path string) error {
 	return err
 }
 
-func downloadToFile(path string, r io.Reader, total int64, w io.Writer) error {
+func fetch(path string, r io.Reader, total int64, w io.Writer) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
@@ -512,26 +533,26 @@ func downloadToFile(path string, r io.Reader, total int64, w io.Writer) error {
 
 	src := io.Reader(r)
 	if w != nil && total > 0 {
-		src = &progressReader{r: r, total: total, w: w}
+		src = &progress{r: r, total: total, w: w}
 	}
 
 	_, err = io.Copy(f, src)
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
+	if e := f.Close(); err == nil {
+		err = e
 	}
 	return err
 }
 
-type progressReader struct {
+type progress struct {
 	r       io.Reader
 	w       io.Writer
 	total   int64
 	current int64
 }
 
-func (p *progressReader) Read(b []byte) (int, error) {
+func (p *progress) Read(b []byte) (int, error) {
 	n, err := p.r.Read(b)
 	p.current += int64(n)
-	fmt.Fprintf(p.w, "\rdownloading: %.1f%%", float64(p.current)/float64(p.total)*100)
+	fmt.Fprintf(p.w, "\r%.1f%%", float64(p.current)/float64(p.total)*100)
 	return n, err
 }

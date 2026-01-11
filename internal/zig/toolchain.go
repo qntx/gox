@@ -13,43 +13,130 @@ import (
 	"github.com/qntx/gox/internal/archive"
 )
 
+// ----------------------------------------------------------------------------
+// Constants
+// ----------------------------------------------------------------------------
+
 const (
-	indexURL       = "https://ziglang.org/download/index.json"
-	defaultVersion = "master"
-	exeSuffix      = ".exe"
+	indexURL = "https://ziglang.org/download/index.json"
+	defVer   = "master"
 )
 
-// Host platform mappings to Zig target names
-var (
-	hostArch = map[string]string{
-		"amd64": "x86_64", "386": "x86", "arm64": "aarch64", "arm": "armv7a",
-	}
-	hostOS = map[string]string{
-		"linux": "linux", "darwin": "macos", "windows": "windows",
-	}
-)
+// ----------------------------------------------------------------------------
+// Types
+// ----------------------------------------------------------------------------
 
-// Index represents the Zig download index.
+// Index maps version names to releases.
 type Index map[string]Release
 
-// Release represents a Zig release version with available targets.
+// Release represents a Zig release.
 type Release struct {
 	Version string            `json:"version,omitempty"`
 	Date    string            `json:"date,omitempty"`
 	Targets map[string]Target `json:"-"`
 }
 
-// Target represents a downloadable Zig build.
+// Target represents a downloadable build.
 type Target struct {
 	Tarball string `json:"tarball"`
 	Shasum  string `json:"shasum"`
 	Size    string `json:"size"`
 }
 
-var metadataKeys = map[string]bool{
-	"version": true, "date": true, "notes": true,
-	"src": true, "bootstrap": true, "stdDocs": true,
+// ----------------------------------------------------------------------------
+// Public API
+// ----------------------------------------------------------------------------
+
+// Ensure downloads and caches a Zig version. Returns installation path.
+func Ensure(ctx context.Context, version string) (string, error) {
+	if version == "" {
+		version = defVer
+	}
+
+	dir := Path(version)
+	if hasZig(dir) {
+		return dir, nil
+	}
+
+	fmt.Fprintln(os.Stderr, "fetching zig index...")
+
+	idx, err := fetchIndex(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	rel, ok := idx[version]
+	if !ok {
+		return "", fmt.Errorf("version %q not found", version)
+	}
+
+	host := platform()
+	tgt, ok := rel.Targets[host]
+	if !ok {
+		return "", fmt.Errorf("no build for %s", host)
+	}
+
+	fmt.Fprintf(os.Stderr, "downloading zig %s (%s)...\n", version, host)
+
+	if err := archive.Download(ctx, tgt.Tarball, dir); err != nil {
+		return "", err
+	}
+	return dir, nil
 }
+
+// Path returns the installation path for a version.
+func Path(version string) string {
+	return filepath.Join(cacheDir(), "zig", version)
+}
+
+// Installed returns all cached versions.
+func Installed() ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(cacheDir(), "zig"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			out = append(out, e.Name())
+		}
+	}
+	return out, nil
+}
+
+// Remove deletes a specific version.
+func Remove(version string) error {
+	return os.RemoveAll(Path(version))
+}
+
+// RemoveAll deletes all cached versions.
+func RemoveAll() error {
+	return os.RemoveAll(filepath.Join(cacheDir(), "zig"))
+}
+
+// ----------------------------------------------------------------------------
+// Internal
+// ----------------------------------------------------------------------------
+
+var (
+	archMap = map[string]string{
+		"amd64": "x86_64",
+		"386":   "x86",
+		"arm64": "aarch64",
+		"arm":   "armv7a",
+	}
+	osMap = map[string]string{
+		"darwin": "macos",
+	}
+	skipKeys = map[string]bool{
+		"version": true, "date": true, "notes": true,
+		"src": true, "bootstrap": true, "stdDocs": true,
+	}
+)
 
 func (r *Release) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
@@ -61,104 +148,16 @@ func (r *Release) UnmarshalJSON(data []byte) error {
 	_ = json.Unmarshal(raw["date"], &r.Date)
 
 	r.Targets = make(map[string]Target)
-	for key, val := range raw {
-		if metadataKeys[key] {
+	for k, v := range raw {
+		if skipKeys[k] {
 			continue
 		}
 		var t Target
-		if json.Unmarshal(val, &t) == nil && t.Tarball != "" {
-			r.Targets[key] = t
+		if json.Unmarshal(v, &t) == nil && t.Tarball != "" {
+			r.Targets[k] = t
 		}
 	}
 	return nil
-}
-
-// Ensure downloads and caches a Zig version if not already present.
-// Returns the path to the Zig installation directory.
-func Ensure(ctx context.Context, version string) (string, error) {
-	if version == "" {
-		version = defaultVersion
-	}
-
-	dir := Path(version)
-	if hasBinary(dir) {
-		return dir, nil
-	}
-
-	fmt.Fprintln(os.Stderr, "fetching zig version index...")
-
-	index, err := fetchIndex(ctx)
-	if err != nil {
-		return "", fmt.Errorf("fetch index: %w", err)
-	}
-
-	release, ok := index[version]
-	if !ok {
-		return "", fmt.Errorf("zig version %q not found", version)
-	}
-
-	host := hostPlatform()
-	target, ok := release.Targets[host]
-	if !ok {
-		return "", fmt.Errorf("no zig build for %s", host)
-	}
-
-	fmt.Fprintf(os.Stderr, "downloading zig %s for %s...\n", version, host)
-
-	if err := archive.Download(ctx, target.Tarball, dir); err != nil {
-		return "", fmt.Errorf("download: %w", err)
-	}
-	return dir, nil
-}
-
-// Path returns the cache path for a Zig version.
-func Path(version string) string {
-	return filepath.Join(cacheDir(), "zig", version)
-}
-
-// Installed returns all cached Zig versions.
-func Installed() ([]string, error) {
-	entries, err := os.ReadDir(filepath.Join(cacheDir(), "zig"))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read cache: %w", err)
-	}
-
-	versions := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() {
-			versions = append(versions, e.Name())
-		}
-	}
-	return versions, nil
-}
-
-// Remove deletes a specific Zig version from cache.
-func Remove(version string) error {
-	return os.RemoveAll(Path(version))
-}
-
-// RemoveAll deletes all cached Zig versions.
-func RemoveAll() error {
-	return os.RemoveAll(filepath.Join(cacheDir(), "zig"))
-}
-
-func hasBinary(dir string) bool {
-	bin := filepath.Join(dir, "zig")
-	if runtime.GOOS == "windows" {
-		bin += exeSuffix
-	}
-	_, err := os.Stat(bin)
-	return err == nil
-}
-
-func cacheDir() string {
-	if dir, err := os.UserCacheDir(); err == nil {
-		return filepath.Join(dir, "gox")
-	}
-	return filepath.Join(os.TempDir(), "gox")
 }
 
 func fetchIndex(ctx context.Context) (Index, error) {
@@ -177,21 +176,34 @@ func fetchIndex(ctx context.Context) (Index, error) {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	var index Index
-	if err := json.NewDecoder(resp.Body).Decode(&index); err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
-	}
-	return index, nil
+	var idx Index
+	return idx, json.NewDecoder(resp.Body).Decode(&idx)
 }
 
-func hostPlatform() string {
-	arch := hostArch[runtime.GOARCH]
+func platform() string {
+	arch := archMap[runtime.GOARCH]
 	if arch == "" {
 		arch = runtime.GOARCH
 	}
-	os := hostOS[runtime.GOOS]
-	if os == "" {
-		os = runtime.GOOS
+	goos := osMap[runtime.GOOS]
+	if goos == "" {
+		goos = runtime.GOOS
 	}
-	return arch + "-" + os
+	return arch + "-" + goos
+}
+
+func hasZig(dir string) bool {
+	bin := filepath.Join(dir, "zig")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	_, err := os.Stat(bin)
+	return err == nil
+}
+
+func cacheDir() string {
+	if dir, err := os.UserCacheDir(); err == nil {
+		return filepath.Join(dir, "gox")
+	}
+	return filepath.Join(os.TempDir(), "gox")
 }

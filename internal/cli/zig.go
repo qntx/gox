@@ -5,55 +5,65 @@ import (
 	"os"
 	"slices"
 
-	"github.com/qntx/gox/internal/zig"
 	"github.com/spf13/cobra"
+
+	"github.com/qntx/gox/internal/zig"
 )
 
-const defaultZigVersion = "master"
+// ----------------------------------------------------------------------------
+// Commands
+// ----------------------------------------------------------------------------
 
-var zigCmd = &cobra.Command{
-	Use:   "zig",
-	Short: "Manage Zig compiler installations",
-}
+var (
+	zigCmd = &cobra.Command{
+		Use:   "zig",
+		Short: "Manage Zig compiler installations",
+	}
 
-var zigUpdateCmd = &cobra.Command{
-	Use:   "update [version]",
-	Short: "Update or install a Zig version",
-	Long: `Download and install a Zig compiler version.
+	zigUpdateCmd = &cobra.Command{
+		Use:   "update [version]",
+		Short: "Update or install a Zig version",
+		Long: `Download and install a Zig compiler version.
 If no version is specified, updates the 'master' version to latest.
 Use --force to re-download even if already installed.`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: runZigUpdate,
-}
+		Args: cobra.MaximumNArgs(1),
+		RunE: runZigUpdate,
+	}
 
-var zigListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List installed Zig versions",
-	RunE:  runZigList,
-}
+	zigListCmd = &cobra.Command{
+		Use:   "list",
+		Short: "List installed Zig versions",
+		RunE:  runZigList,
+	}
 
-var zigCleanCmd = &cobra.Command{
-	Use:   "clean [version]",
-	Short: "Remove cached Zig installations",
-	Long: `Remove cached Zig compiler installations.
+	zigCleanCmd = &cobra.Command{
+		Use:   "clean [version]",
+		Short: "Remove cached Zig installations",
+		Long: `Remove cached Zig compiler installations.
 If no version is specified, removes all cached versions.`,
-	Args: cobra.MaximumNArgs(1),
-	RunE: runZigClean,
-}
+		Args: cobra.MaximumNArgs(1),
+		RunE: runZigClean,
+	}
+)
 
 func init() {
 	zigUpdateCmd.Flags().BoolP("force", "f", false, "force re-download")
+
 	zigCmd.AddCommand(zigUpdateCmd, zigListCmd, zigCleanCmd)
 	rootCmd.AddCommand(zigCmd)
 }
 
+// ----------------------------------------------------------------------------
+// Handlers
+// ----------------------------------------------------------------------------
+
 func runZigUpdate(cmd *cobra.Command, args []string) error {
-	version := argOr(args, 0, defaultZigVersion)
+	version := firstOr(args, "master")
 	force, _ := cmd.Flags().GetBool("force")
 
 	if force {
 		if err := zig.Remove(version); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove existing: %w", err)
+			return fmt.Errorf("remove: %w", err)
 		}
 	}
 
@@ -62,7 +72,7 @@ func runZigUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Printf("zig %s ready: %s\n", version, path)
+	fmt.Printf("zig %s: %s\n", version, path)
 	return nil
 }
 
@@ -71,14 +81,13 @@ func runZigList(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-
 	if len(versions) == 0 {
-		fmt.Println("No Zig versions installed.")
+		fmt.Println("no zig versions installed")
 		return nil
 	}
 
 	slices.Sort(versions)
-	fmt.Println("Installed Zig versions:")
+	fmt.Println("installed:")
 	for _, v := range versions {
 		fmt.Printf("  %s\t%s\n", v, zig.Path(v))
 	}
@@ -87,47 +96,48 @@ func runZigList(_ *cobra.Command, _ []string) error {
 
 func runZigClean(_ *cobra.Command, args []string) error {
 	if len(args) > 0 {
-		return removeVersion(args[0])
+		return cleanOne(args[0])
 	}
-	return removeAll()
+	return cleanAll()
 }
 
-func removeVersion(version string) error {
+// ----------------------------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------------------------
+
+func cleanOne(version string) error {
 	err := zig.Remove(version)
-	switch {
-	case os.IsNotExist(err):
-		fmt.Printf("zig %s not installed\n", version)
-		return nil
-	case err != nil:
-		return fmt.Errorf("remove %s: %w", version, err)
-	default:
-		fmt.Printf("removed zig %s\n", version)
+	if os.IsNotExist(err) {
+		fmt.Printf("zig %s: not installed\n", version)
 		return nil
 	}
+	if err != nil {
+		return err
+	}
+	fmt.Printf("removed: %s\n", version)
+	return nil
 }
 
-func removeAll() error {
+func cleanAll() error {
 	versions, err := zig.Installed()
 	if err != nil {
 		return err
 	}
-
 	if len(versions) == 0 {
-		fmt.Println("No Zig versions to clean.")
+		fmt.Println("nothing to clean")
 		return nil
 	}
 
 	if err := zig.RemoveAll(); err != nil {
-		return fmt.Errorf("remove all: %w", err)
+		return err
 	}
-
 	fmt.Printf("removed %d version(s)\n", len(versions))
 	return nil
 }
 
-func argOr(args []string, idx int, def string) string {
-	if idx < len(args) {
-		return args[idx]
+func firstOr(s []string, def string) string {
+	if len(s) > 0 {
+		return s[0]
 	}
 	return def
 }
