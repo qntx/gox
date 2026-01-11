@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/qntx/gox/internal/build"
 	"github.com/qntx/gox/internal/zig"
@@ -15,6 +16,7 @@ type buildFlags struct {
 	config   string
 	targets  []string
 	linkMode string
+	parallel bool
 	opts     build.Options
 }
 
@@ -63,6 +65,7 @@ func init() {
 	// Build options
 	f.StringSliceVar(&bf.opts.BuildFlags, "flags", nil, "additional go build flags")
 	f.BoolVarP(&bf.opts.Verbose, "verbose", "v", false, "verbose output")
+	f.BoolVarP(&bf.parallel, "parallel", "j", false, "build targets in parallel")
 
 	rootCmd.AddCommand(buildCmd)
 }
@@ -73,6 +76,13 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if bf.parallel && len(optsList) > 1 {
+		return runParallel(cmd, args, optsList)
+	}
+	return runSequential(cmd, args, optsList)
+}
+
+func runSequential(cmd *cobra.Command, args []string, optsList []*build.Options) error {
 	total := len(optsList)
 	for i, opts := range optsList {
 		if err := executeBuild(cmd, args, opts, i, total); err != nil {
@@ -80,6 +90,46 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return nil
+}
+
+func runParallel(cmd *cobra.Command, args []string, optsList []*build.Options) error {
+	type result struct {
+		idx  int
+		opts *build.Options
+		err  error
+	}
+
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		results []result
+	)
+
+	for i, opts := range optsList {
+		wg.Go(func() {
+			err := executeBuild(cmd, args, opts, i, len(optsList))
+			mu.Lock()
+			results = append(results, result{i, opts, err})
+			mu.Unlock()
+		})
+	}
+	wg.Wait()
+
+	// Collect errors
+	var errs []error
+	for _, r := range results {
+		if r.err != nil {
+			errs = append(errs, fmt.Errorf("%s/%s: %w", r.opts.GOOS, r.opts.GOARCH, r.err))
+		}
+	}
+
+	if len(errs) == 0 {
+		return nil
+	}
+	if len(errs) == 1 {
+		return errs[0]
+	}
+	return fmt.Errorf("%d targets failed: %v", len(errs), errs)
 }
 
 func executeBuild(cmd *cobra.Command, args []string, opts *build.Options, idx, total int) error {

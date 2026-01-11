@@ -301,7 +301,7 @@ func resolveSymlinks(symlinks []pendingSymlink) error {
 
 func resolveChain(base, linkname string, linkMap map[string]string) string {
 	target := filepath.Join(filepath.Dir(base), linkname)
-	for i := 0; i < maxSymlinkDepth; i++ {
+	for range maxSymlinkDepth {
 		next, ok := linkMap[target]
 		if !ok {
 			return target
