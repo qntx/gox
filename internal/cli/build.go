@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -96,7 +95,7 @@ func buildSequential(cmd *cobra.Command, args []string, opts []*build.Options) e
 }
 
 func buildParallel(cmd *cobra.Command, args []string, opts []*build.Options) error {
-	ui.Info("Building %d targets in parallel...", len(opts))
+	ui.Header(fmt.Sprintf("Building %d targets", len(opts)))
 
 	type result struct {
 		target string
@@ -121,11 +120,10 @@ func buildParallel(cmd *cobra.Command, args []string, opts []*build.Options) err
 		close(results)
 	}()
 
-	// Print results as they complete
 	var errs []error
 	for r := range results {
 		if r.output != "" {
-			os.Stderr.WriteString(r.output)
+			fmt.Print(r.output)
 		}
 		if r.err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", r.target, r.err))
@@ -134,7 +132,7 @@ func buildParallel(cmd *cobra.Command, args []string, opts []*build.Options) err
 
 	switch len(errs) {
 	case 0:
-		ui.Success("All %d targets built successfully", len(opts))
+		ui.Success("All %d targets built", len(opts))
 		return nil
 	case 1:
 		return errs[0]
@@ -154,11 +152,9 @@ func doBuild(cmd *cobra.Command, args []string, opts *build.Options, idx, total 
 		return fmt.Errorf("zig: %w", err)
 	}
 
-	if total > 1 {
-		fmt.Fprintf(os.Stderr, "\n[%d/%d] %s/%s\n", idx+1, total, opts.GOOS, opts.GOARCH)
-	}
+	ui.Target(idx, total, opts.GOOS, opts.GOARCH)
 	if opts.Verbose {
-		fmt.Fprintf(os.Stderr, "zig: %s\n", zigPath)
+		ui.Label("zig", zigPath)
 	}
 
 	return build.New(zigPath, opts).Run(cmd.Context(), args)

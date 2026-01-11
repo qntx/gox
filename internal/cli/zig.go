@@ -77,10 +77,13 @@ func runZigList(_ *cobra.Command, _ []string) error {
 	}
 
 	slices.Sort(versions)
-	ui.Info("Installed:")
+	ui.Header("Installed Zig Versions")
+
+	tbl := ui.NewTable("VERSION", "PATH")
 	for _, v := range versions {
-		ui.Step("%-12s %s", v, zig.Path(v))
+		tbl.AddRow(v, zig.Path(v))
 	}
+	tbl.Render()
 	return nil
 }
 

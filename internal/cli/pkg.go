@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
@@ -74,13 +75,17 @@ func runPkgList(_ *cobra.Command, _ []string) error {
 		return strings.Compare(a.Name, b.Name)
 	})
 
+	ui.Header("Cached Packages")
+
+	tbl := ui.NewTable("NAME", "SIZE", "INCLUDE", "LIB")
 	var total int64
-	ui.Info("Cached packages:")
 	for _, p := range pkgs {
-		ui.Step("%-45s %s", p.Name, ui.FormatSize(p.Size))
+		tbl.AddRow(p.Name, ui.FormatSize(p.Size), fmt.Sprintf("%d", p.Include), fmt.Sprintf("%d", p.Lib))
 		total += p.Size
 	}
-	fmt.Println()
+	tbl.Render()
+
+	fmt.Fprintln(os.Stderr)
 	ui.Label("total", fmt.Sprintf("%d packages, %s", len(pkgs), ui.FormatSize(total)))
 	ui.Label("path", build.CacheDir())
 	return nil
@@ -102,6 +107,7 @@ func runPkgInfo(_ *cobra.Command, args []string) error {
 	name := args[0]
 	for _, p := range pkgs {
 		if p.Name == name || matchGlob(p.Name, name) {
+			ui.Header("Package Info")
 			ui.Label("name", p.Name)
 			ui.Label("path", p.Path)
 			ui.Label("size", ui.FormatSize(p.Size))

@@ -63,7 +63,7 @@ func Ensure(ctx context.Context, version string) (string, error) {
 		return "", fmt.Errorf("no build for %s", host)
 	}
 
-	ui.Info("Downloading zig %s (%s)...", version, host)
+	ui.Downloading(fmt.Sprintf("zig %s (%s)", version, host), 1)
 
 	if err := archive.Download(ctx, tgt.Tarball, dir); err != nil {
 		return "", err

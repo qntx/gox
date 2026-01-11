@@ -101,7 +101,7 @@ func EnsureAll(ctx context.Context, sources []string) ([]*Package, error) {
 
 	// Download with progress tracking
 	tracker := ui.NewTracker()
-	ui.Info("Downloading %d package(s)...", len(toDownload))
+	ui.Downloading("", len(toDownload))
 
 	var (
 		wg  sync.WaitGroup

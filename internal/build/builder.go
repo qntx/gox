@@ -87,7 +87,7 @@ func (b *Builder) build(ctx context.Context, pkgs []string) error {
 	env := b.env()
 	args := b.args(pkgs)
 
-	fmt.Fprintf(b.stderr, "%s Building %s/%s\n", ui.InfoPrefix(), b.opts.GOOS, b.opts.GOARCH)
+	ui.Building(fmt.Sprintf("%s/%s", b.opts.GOOS, b.opts.GOARCH))
 	if b.opts.Verbose {
 		b.log(env, args)
 	}
@@ -98,15 +98,11 @@ func (b *Builder) build(ctx context.Context, pkgs []string) error {
 	cmd.Stdout, cmd.Stderr = b.stdout, b.stderr
 
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(b.stderr, "%s Build failed\n", ui.ErrorPrefix())
+		ui.BuildFailed()
 		return err
 	}
 
-	if out := b.output(); out != "" {
-		fmt.Fprintf(b.stderr, "%s Built %s in %s\n", ui.SuccessPrefix(), out, ui.FormatDuration(time.Since(start)))
-	} else {
-		fmt.Fprintf(b.stderr, "%s Built in %s\n", ui.SuccessPrefix(), ui.FormatDuration(time.Since(start)))
-	}
+	ui.Built(b.output(), time.Since(start))
 	return nil
 }
 
