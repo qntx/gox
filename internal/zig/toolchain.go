@@ -63,11 +63,19 @@ func Ensure(ctx context.Context, version string) (string, error) {
 		return "", fmt.Errorf("no build for %s", host)
 	}
 
-	ui.Downloading(fmt.Sprintf("zig %s (%s)", version, host), 1)
+	// Get content length for progress bar
+	size, _ := archive.ContentLength(ctx, tgt.Tarball)
 
-	if err := archive.Download(ctx, tgt.Tarball, dir); err != nil {
+	progress := ui.NewProgress()
+	bar := progress.AddBar(fmt.Sprintf("zig %s (%s)", version, host), size)
+
+	if err := archive.DownloadTo(ctx, tgt.Tarball, dir, bar.ProxyReader); err != nil {
+		bar.Abort(true)
+		progress.Wait()
 		return "", err
 	}
+	bar.Complete()
+	progress.Wait()
 
 	ui.Success("Installed zig %s", version)
 	return dir, nil

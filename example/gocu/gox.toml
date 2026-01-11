@@ -1,6 +1,6 @@
 [default]
 zig-version = "0.15.2"
-verbose = true
+verbose = false
 
 [[target]]
 name = "linux-cuda"
@@ -20,7 +20,7 @@ name = "windows-cuda"
 os = "windows"
 arch = "amd64"
 packages = [
-  "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/windows-x86_64/cuda_cudart-windows-x86_64-12.9.79-archive.zip",
+  "gocnn-lib/cudart@v12.9.79/windows-amd64.zip",
   "https://developer.download.nvidia.com/compute/cuda/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-12.9.1.4-archive.zip",
 ]
 link = ["cudart", "cublas"]

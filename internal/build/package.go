@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/qntx/gox/internal/archive"
 	"github.com/qntx/gox/internal/ui"
@@ -46,17 +48,36 @@ func Parse(source string) (*Package, error) {
 
 // Ensure downloads and extracts if not cached.
 func (p *Package) Ensure(ctx context.Context) error {
+	return p.EnsureWithProgress(ctx, nil)
+}
+
+// EnsureWithProgress downloads with optional progress bar.
+func (p *Package) EnsureWithProgress(ctx context.Context, bar *ui.Bar) error {
 	dir := filepath.Join(pkgCache(), p.Dir)
 	p.Include = filepath.Join(dir, "include")
 	p.Lib = filepath.Join(dir, "lib")
 
 	if isDir(dir) {
+		if bar != nil {
+			bar.Complete()
+		}
 		return p.check()
 	}
 
-	if err := archive.Download(ctx, p.URL, dir); err != nil {
+	var proxyReader func(io.Reader) io.Reader
+	if bar != nil {
+		proxyReader = bar.ProxyReader
+	}
+
+	if err := archive.DownloadTo(ctx, p.URL, dir, proxyReader); err != nil {
 		os.RemoveAll(dir)
+		if bar != nil {
+			bar.Abort(true)
+		}
 		return err
+	}
+	if bar != nil {
+		bar.Complete()
 	}
 	return p.check()
 }
@@ -99,9 +120,17 @@ func EnsureAll(ctx context.Context, sources []string) ([]*Package, error) {
 		return pkgs, nil
 	}
 
-	// Download with progress tracking
-	tracker := ui.NewTracker()
-	ui.Downloading("", len(toDownload))
+	// Fetch content lengths for progress bars
+	sizes := make(map[string]int64)
+	for _, p := range toDownload {
+		if size, err := archive.ContentLength(ctx, p.URL); err == nil && size > 0 {
+			sizes[p.URL] = size
+		}
+	}
+
+	// Download with progress bars
+	progress := ui.NewProgress()
+	start := time.Now()
 
 	var (
 		wg  sync.WaitGroup
@@ -109,25 +138,25 @@ func EnsureAll(ctx context.Context, sources []string) ([]*Package, error) {
 		err error
 	)
 	for _, p := range toDownload {
+		bar := progress.AddBar(p.Dir, sizes[p.URL])
 		wg.Go(func() {
-			if e := p.Ensure(ctx); e != nil {
+			if e := p.EnsureWithProgress(ctx, bar); e != nil {
 				mu.Lock()
 				if err == nil {
 					err = e
 				}
 				mu.Unlock()
-				return
 			}
-			tracker.Done(p.Dir, dirSize(filepath.Join(pkgCache(), p.Dir)))
 		})
 	}
 	wg.Wait()
+	progress.Wait()
 
 	if err != nil {
 		ui.Error("Download failed: %v", err)
 		return nil, err
 	}
-	ui.Success("Downloaded %d package(s) in %s", len(toDownload), ui.FormatDuration(tracker.Elapsed()))
+	ui.Success("Downloaded %d package(s) in %s", len(toDownload), ui.FormatDuration(time.Since(start)))
 	return pkgs, nil
 }
 

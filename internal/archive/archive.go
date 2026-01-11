@@ -74,9 +74,9 @@ func Download(ctx context.Context, url, dst string) error {
 	return DownloadTo(ctx, url, dst, nil)
 }
 
-// DownloadTo downloads with optional progress writer.
-// If pw is nil, no progress is reported.
-func DownloadTo(ctx context.Context, url, dst string, pw io.Writer) error {
+// DownloadTo downloads with optional progress tracking.
+// If proxyReader is provided, it wraps the response body to track progress.
+func DownloadTo(ctx context.Context, url, dst string, proxyReader func(io.Reader) io.Reader) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -98,8 +98,14 @@ func DownloadTo(ctx context.Context, url, dst string, pw io.Writer) error {
 	}
 	defer os.RemoveAll(tmp)
 
+	// Wrap body with progress reader if provided
+	body := io.Reader(resp.Body)
+	if proxyReader != nil {
+		body = proxyReader(body)
+	}
+
 	file := filepath.Join(tmp, "archive"+Detect(url).Ext())
-	if err := fetchTo(file, resp.Body, pw); err != nil {
+	if err := fetchToReader(file, body); err != nil {
 		return err
 	}
 
@@ -516,6 +522,18 @@ func fetchTo(path string, r io.Reader, pw io.Writer) error {
 	}
 
 	_, err = io.Copy(dst, r)
+	if e := f.Close(); err == nil {
+		err = e
+	}
+	return err
+}
+
+func fetchToReader(path string, r io.Reader) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(f, r)
 	if e := f.Close(); err == nil {
 		err = e
 	}
