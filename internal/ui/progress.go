@@ -19,7 +19,8 @@ func NewProgress() *Progress {
 	return &Progress{
 		p: mpb.New(
 			mpb.WithOutput(os.Stderr),
-			mpb.WithWidth(60),
+			mpb.WithWidth(40),
+			mpb.WithAutoRefresh(),
 		),
 	}
 }
@@ -34,13 +35,13 @@ func (p *Progress) AddBar(name string, total int64) *Bar {
 	}
 
 	bar := p.p.New(total,
-		mpb.BarStyle().Lbound("│").Filler("█").Tip("█").Padding("░").Rbound("│"),
+		// Use ASCII chars for consistent width across terminals
+		mpb.BarStyle().Lbound("[").Filler("=").Tip(">").Padding("-").Rbound("]"),
 		mpb.PrependDecorators(
 			decor.Name(displayName, decor.WC{W: 40, C: decor.DindentRight}),
 		),
 		mpb.AppendDecorators(
 			decor.CountersKibiByte("% .1f / % .1f"),
-			decor.Name(" "),
 			decor.Percentage(decor.WC{W: 5}),
 		),
 	)

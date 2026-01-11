@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -96,6 +97,11 @@ func buildSequential(cmd *cobra.Command, args []string, opts []*build.Options) e
 
 func buildParallel(cmd *cobra.Command, args []string, opts []*build.Options) error {
 	ui.Header(fmt.Sprintf("Building %d targets", len(opts)))
+
+	// Pre-download all packages before parallel builds to avoid progress bar conflicts
+	if err := preDownloadPackages(cmd.Context(), opts); err != nil {
+		return err
+	}
 
 	type result struct {
 		target string
@@ -242,4 +248,28 @@ func setBoolIf(f changedChecker, name string, dst *bool, src bool) {
 	if f.Changed(name) {
 		*dst = src
 	}
+}
+
+// preDownloadPackages downloads all packages from all build options before builds start.
+// This prevents progress bar conflicts when multiple builds download concurrently.
+func preDownloadPackages(ctx context.Context, opts []*build.Options) error {
+	// Collect all unique packages
+	seen := make(map[string]bool)
+	var allPkgs []string
+	for _, o := range opts {
+		for _, pkg := range o.Packages {
+			if !seen[pkg] {
+				seen[pkg] = true
+				allPkgs = append(allPkgs, pkg)
+			}
+		}
+	}
+
+	if len(allPkgs) == 0 {
+		return nil
+	}
+
+	// Download all packages in one batch
+	_, err := build.EnsureAll(ctx, allPkgs)
+	return err
 }
