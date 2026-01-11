@@ -1,14 +1,15 @@
 # gox
 
-**CGO cross-compilation powered by Zig.**
+CGO cross-compilation powered by Zig.
 
-Cross-compile Go programs with C dependencies to any platform—without installing platform-specific toolchains, Docker containers, or complex build configurations. `gox` leverages [Zig](https://ziglang.org/)'s hermetic C/C++ compiler to provide a seamless cross-compilation experience.
+Cross-compile Go programs with C dependencies to any platform without installing platform-specific toolchains, Docker containers, or complex build configurations.
 
 ## Features
 
 - **Zero Configuration** — Zig compiler auto-downloaded and cached on first use
 - **Any Host → Any Target** — Build from Windows/macOS/Linux to any supported platform
 - **Static Binaries** — Produce fully self-contained executables with musl libc
+- **Production Builds** — Strip symbols with `-s` for minimal binary size
 
 ## Installation
 
@@ -16,166 +17,147 @@ Cross-compile Go programs with C dependencies to any platform—without installi
 go install github.com/qntx/gox/cmd/gox@latest
 ```
 
-## Quick Start
-
-```bash
-gox build                                            # Build for current platform
-gox build --os linux --arch arm64                    # Cross-compile to Linux ARM64
-gox build --os linux --arch amd64 --linkmode static  # Static binary with musl
-```
-
 ## Usage
 
-### Basic Syntax
+### Syntax
 
 ```bash
 gox build [packages] [flags]
 ```
 
-### Example
+### Examples
 
 ```bash
-# Cross-compile to different platforms
-gox build --os darwin --arch arm64                   # macOS Apple Silicon
-gox build --os windows --arch amd64 -o app.exe       # Windows x64
-gox build --os linux --arch riscv64                  # Linux RISC-V
+# cross-compile to different platforms
+gox build --os darwin --arch arm64                    # macOS Apple Silicon
+gox build --os windows --arch amd64 -o app.exe        # Windows x64
+gox build --os linux --arch riscv64                   # Linux RISC-V
 
-# Static linking (Linux)
+# static linking
 gox build --os linux --arch amd64 --linkmode static
 
-# Link external C libraries
-gox build --os linux --arch amd64 \
-    -I/usr/include/openssl \
-    -L/usr/lib \
-    -lssl -lcrypto
+# production build with stripped symbols
+gox build -s -o app
 
-# Pass flags to go build
-gox build --flags "-tags=prod" --flags "-trimpath" --flags "-ldflags=-s -w"
+# link external C libraries
+gox build -I/usr/include/openssl -L/usr/lib -lssl -lcrypto
 
-# Standard layout: output to ./myapp/bin/myapp with rpath for ./myapp/lib/
-gox build --os linux --arch amd64 --prefix ./myapp
+# pass flags to go build
+gox build --flags "-tags=prod" --flags "-trimpath"
 
-# Build and create archive for distribution
-gox build --os linux --arch amd64 -o ./app --pack
-# → ./app, ./app-linux-amd64.tar.gz
+# output to prefix directory with rpath
+gox build --os linux --arch amd64 --prefix ./dist
 
-gox build --os windows --arch amd64 --prefix ./myapp --pack
-# → ./myapp/bin/myapp.exe, ./myapp-windows-amd64.zip
+# build and create archive
+gox build --os linux --arch amd64 -o ./app --pack     # creates app-linux-amd64.tar.gz
+gox build --os windows --arch amd64 --prefix ./dist --pack
+
+# parallel builds
+gox build -j
 ```
 
-## Configuration File
+## Configuration
 
-Create a `gox.toml` file in your project root to define reusable build configurations:
+Create `gox.toml` in your project root:
 
 ```toml
 [default]
 zig-version = "0.15.2"
-verbose = true
+strip       = true
+verbose     = false
 
 [[target]]
-name = "linux-cuda"
-os = "linux"
-arch = "amd64"
-include = ["C:\\cuda\\include"]
-lib = ["./lib"]
-link = ["cudart", "cublas"]
-prefix = "./dist/linux"
-flags = ["-tags=cuda"]
+name     = "linux-amd64"
+os       = "linux"
+arch     = "amd64"
+prefix   = "./dist/linux"
+packages = ["gocnn-lib/cudart@v12.9.79/linux-amd64.tar.xz"]
+link     = ["cuda", "cublas"]
+flags    = ["-tags=cuda"]
 
 [[target]]
-name = "windows-release"
-os = "windows"
-arch = "amd64"
-linkmode = "static"
-prefix = "./dist/windows"
-pack = true
+name     = "windows-amd64"
+os       = "windows"
+arch     = "amd64"
+prefix   = "./dist/windows"
+pack     = true
 ```
 
 ```bash
-# Build all targets in config
-gox build
-
-# Build specific target
-gox build --target linux-cuda
-
-# CLI flags override config values
-gox build --target linux-cuda --verbose=false
-
-# Specify custom config file
-gox build --config ./build/gox.toml --target linux-cuda
+gox build                                             # build all targets
+gox build -j                                          # build all targets in parallel
+gox build -t linux-amd64                              # build specific target
+gox build -t linux-amd64 --verbose                    # override config
+gox build -c ./build/gox.toml                         # custom config path
 ```
 
 ### Configuration Reference
 
-**`[default]`** — Global defaults applied to all targets:
+#### `[default]`
+
+Global defaults applied to all targets.
 
 | Key | Type | Description |
 | :--- | :--- | :--- |
-| `zig-version` | string | Zig compiler version |
-| `verbose` | bool | Enable verbose output |
-| `pack` | bool | Create archive after build |
-| `linkmode` | string | Link mode: `auto`, `static`, `dynamic` |
+| `zig-version` | `string` | Zig compiler version |
+| `linkmode` | `string` | Link mode: `auto`, `static`, `dynamic` |
+| `include` | `[]string` | C header include directories |
+| `lib` | `[]string` | Library search directories |
+| `link` | `[]string` | Libraries to link |
+| `packages` | `[]string` | Pre-built packages to download |
+| `flags` | `[]string` | Additional go build flags |
+| `strip` | `bool` | Strip symbols (`-ldflags="-s -w"`) |
+| `verbose` | `bool` | Enable verbose output |
 
-**`[[target]]`** — Build target definitions (can define multiple):
+#### `[[target]]`
+
+Build target definitions. Multiple targets can be defined.
 
 | Key | Type | Description |
 | :--- | :--- | :--- |
-| `name` | string | Target identifier for `--target` flag |
-| `os` | string | Target operating system |
-| `arch` | string | Target architecture |
-| `output` | string | Output binary path |
-| `prefix` | string | Output prefix directory |
-| `no-rpath` | bool | Disable rpath |
-| `include` | []string | C header include directories |
-| `lib` | []string | Library search directories |
-| `link` | []string | Libraries to link |
-| `packages` | []string | Pre-built packages to download |
-| `linkmode` | string | Link mode (overrides default) |
-| `flags` | []string | Additional go build flags |
-| `zig-version` | string | Zig version (overrides default) |
-| `verbose` | bool | Verbose output (overrides default) |
-| `pack` | bool | Create archive (overrides default) |
+| `name` | `string` | Target identifier for `--target` flag |
+| `os` | `string` | Target operating system |
+| `arch` | `string` | Target architecture |
+| `output` | `string` | Output binary path |
+| `prefix` | `string` | Output prefix directory |
+| `zig-version` | `string` | Zig version (overrides default) |
+| `linkmode` | `string` | Link mode (overrides default) |
+| `include` | `[]string` | C header include directories |
+| `lib` | `[]string` | Library search directories |
+| `link` | `[]string` | Libraries to link |
+| `packages` | `[]string` | Pre-built packages to download |
+| `flags` | `[]string` | Additional go build flags |
+| `no-rpath` | `bool` | Disable rpath |
+| `pack` | `bool` | Create archive after build |
+| `strip` | `bool` | Strip symbols (overrides default) |
+| `verbose` | `bool` | Verbose output (overrides default) |
 
 ## Package Management
 
-Automatically download and configure pre-built libraries for cross-compilation:
+Download and configure pre-built libraries automatically:
 
 ```bash
-# GitHub Release format: owner/repo@version/asset
-gox build --os linux --arch amd64 --pkg qntx/libs@1.0.0/cuda-linux-amd64.tar.gz
+# GitHub release: owner/repo@version/asset
+gox build --pkg owner/repo@v1.0.0/lib-linux-amd64.tar.gz
 
-# Direct URL format
-gox build --os linux --arch amd64 --pkg https://example.com/openssl-1.1.1-linux.tar.gz
+# direct URL
+gox build --pkg https://example.com/lib-1.0.0-linux.tar.gz
 
-# Multiple packages
-gox build --pkg qntx/cuda@1.0/cuda-linux.tar.gz --pkg qntx/ssl@3.0/ssl-linux.tar.gz
+# multiple packages
+gox build --pkg owner/cuda@v1.0/cuda.tar.gz --pkg owner/ssl@v3.0/ssl.tar.gz
 ```
 
-TOML configuration:
-
-```toml
-[[target]]
-name = "linux-cuda"
-os = "linux"
-arch = "amd64"
-packages = [
-  "qntx/cuda@13.1.0/cuda-linux-amd64.tar.gz",
-  "qntx/ssl@3.0/openssl-linux-amd64.tar.gz"
-]
-link = ["cudart", "cublas", "ssl", "crypto"]
-```
-
-**Package Structure Requirements:**
+### Package Structure
 
 Downloaded packages must contain `include/` and/or `lib/` directories:
 
 ```text
 package.tar.gz
-├── include/     # → automatically added to CGO_CFLAGS -I
-└── lib/         # → automatically added to CGO_LDFLAGS -L
+├── include/          # added to CGO_CFLAGS -I
+└── lib/              # added to CGO_LDFLAGS -L
 ```
 
-**Cache Location:** `~/.cache/gox/pkg/`
+**Cache:** `~/.cache/gox/pkg/`
 
 ## Command Reference
 
@@ -188,52 +170,58 @@ package.tar.gz
 | `--os` | | Target operating system |
 | `--arch` | | Target architecture |
 | `--output` | `-o` | Output binary path |
-| `--prefix` | | Output prefix directory (creates `bin/lib` structure with rpath) |
-| `--no-rpath` | | Disable rpath when using `--prefix` |
-| `--pack` | | Create archive after build (`.tar.gz` for Linux/macOS, `.zip` for Windows) |
-| `--linkmode` | | Link mode: `auto` (default), `static`, `dynamic` |
-| `--include` | `-I` | C header include directories (repeatable) |
-| `--lib` | `-L` | Library search directories (repeatable) |
-| `--link` | `-l` | Libraries to link (repeatable) |
-| `--pkg` | | Pre-built packages to download (repeatable) |
+| `--prefix` | | Output prefix directory with rpath |
 | `--zig-version` | | Zig compiler version (default: `master`) |
-| `--flags` | | Additional flags passed to `go build` (repeatable) |
+| `--linkmode` | | Link mode: `auto`, `static`, `dynamic` |
+| `--include` | `-I` | C header include directories |
+| `--lib` | `-L` | Library search directories |
+| `--link` | `-l` | Libraries to link |
+| `--pkg` | | Pre-built packages to download |
+| `--flags` | | Additional flags passed to `go build` |
+| `--no-rpath` | | Disable rpath when using `--prefix` |
+| `--pack` | | Create archive after build |
+| `--strip` | `-s` | Strip symbols (`-ldflags="-s -w"`) |
 | `--verbose` | `-v` | Print detailed build information |
+| `--parallel` | `-j` | Build targets in parallel |
+
+### `gox pkg`
+
+Manage cached dependency packages in `~/.cache/gox/pkg/`.
+
+| Command | Description |
+| :--- | :--- |
+| `gox pkg list` | List cached packages |
+| `gox pkg info <name>` | Show package details |
+| `gox pkg install <source>...` | Download packages to cache |
+| `gox pkg clean [name]` | Remove cached packages |
 
 ### `gox zig`
 
-Manage Zig compiler installations cached in `~/.cache/gox/zig/`.
+Manage Zig compiler installations in `~/.cache/gox/zig/`.
 
 | Command | Description |
 | :--- | :--- |
 | `gox zig update [version]` | Install or update Zig (default: `master`) |
-| `gox zig list` | List all cached Zig versions |
+| `gox zig list` | List cached Zig versions |
 | `gox zig clean [version]` | Remove cached Zig installations |
 
 ## Platform Support
 
-### Architecture Compatibility
+### Supported Targets
 
-`gox` supports the intersection of Go and Zig targets. The following table provides a complete reference:
-
-| OS | Go | Zig | gox |
-| :--- | :--- | :--- | :--- |
-| **Linux** | amd64, arm64, 386, arm, riscv64, loong64, mips64, mips64le, ppc64, ppc64le, s390x, mips, mipsle | amd64, arm64, 386, arm, riscv64, loong64, mips64, mips64le, ppc64, ppc64le, s390x, mips, mipsle | amd64, arm64, 386, arm, riscv64, loong64, ppc64le, s390x |
-| **macOS** | amd64, arm64 | amd64, arm64 | amd64 |
-| **Windows** | amd64, 386, arm64 | amd64, 386, arm64 | amd64, 386, arm64 |
-| **FreeBSD** | amd64, 386, arm, arm64, riscv64 | amd64, arm64, 386, arm | amd64, 386 |
-| **NetBSD** | amd64, 386, arm, arm64 | amd64, arm64, 386, arm | amd64, arm64, 386, arm |
-| **OpenBSD** | amd64, 386, arm, arm64, ppc64, riscv64 | amd64, arm64, 386, arm | — |
-| **DragonFly** | amd64 | amd64 | — |
-| **Solaris** | amd64 | amd64 | — |
-| **illumos** | amd64 | amd64 | — |
-| **iOS** | amd64, arm64 | amd64, arm64 | — |
-| **Android** | amd64, 386, arm, arm64 | amd64, arm64, 386, arm | — |
+| OS | Architectures |
+| :--- | :--- |
+| Linux | amd64, arm64, 386, arm, riscv64, loong64, ppc64le, s390x |
+| Windows | amd64, arm64, 386 |
+| macOS | amd64 |
+| FreeBSD | amd64, 386 |
+| NetBSD | amd64, arm64, 386, arm |
 
 ### Unsupported Targets
 
 | Target | Reason |
 | :--- | :--- |
+| `darwin/arm64` | Go runtime requires CoreFoundation framework unavailable in Zig |
 | `js/wasm`, `wasip1/wasm` | WebAssembly does not support CGO |
 | `plan9/*` | Plan 9 does not support CGO |
 | `aix/ppc64` | Zig does not provide AIX libc |
@@ -245,11 +233,10 @@ Manage Zig compiler installations cached in `~/.cache/gox/zig/`.
 | `ios/*` | Zig does not ship iOS SDK headers |
 | `freebsd/arm*` | Go linker requires `ld.bfd` for FreeBSD ARM |
 | `android/*` | Zig does not ship Android NDK headers |
-| `darwin/arm64` | Go runtime requires CoreFoundation framework unavailable in Zig |
 
 ## How It Works
 
-1. **Zig Download** — On first run, `gox` downloads the Zig compiler for your host platform and caches it in `~/.cache/gox/zig/<version>`.
+1. **Zig Download** — Downloads the Zig compiler for your host platform and caches it in `~/.cache/gox/zig/<version>`.
 
 2. **Environment Setup** — Sets `CC` and `CXX` to use Zig with the appropriate target triple:
 
@@ -258,20 +245,10 @@ Manage Zig compiler installations cached in `~/.cache/gox/zig/`.
    CXX="zig c++ -target x86_64-linux-gnu"
    ```
 
-3. **Build Execution** — Runs `go build` with `CGO_ENABLED=1` and the configured cross-compilation environment.
+3. **Build Execution** — Runs `go build` with `CGO_ENABLED=1` and the configured environment.
 
 Zig's C/C++ compiler is a drop-in replacement for GCC/Clang that ships with libc headers and libraries for all supported targets, eliminating the need for platform-specific cross-compilation toolchains.
 
-## Examples
-
-Working examples are available in the [examples/](./example) directory:
-
-| Example | Description |
-| :--- | :--- |
-| [gocu](./example/gocu) | Cross-compile gocu with vendored C source |
-| [minimal](./example/minimal) | Basic CGO with inline C code |
-| [sqlite](./example/sqlite) | Cross-compile go-sqlite3 with vendored C source |
-
 ## License
 
-Gox has BSD 3-Clause License, see [LICENSE](./LICENSE).
+BSD 3-Clause License. See [LICENSE](./LICENSE).
