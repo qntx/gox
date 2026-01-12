@@ -2,6 +2,12 @@
 
 Basic CGO with inline C code.
 
+## Run
+
+```bash
+gox run .
+```
+
 ## Build
 
 ```bash
