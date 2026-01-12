@@ -24,6 +24,7 @@ go install github.com/qntx/gox/cmd/gox@latest
 ```bash
 gox build [packages] [flags]
 gox run [package] [flags] [-- arguments...]
+gox test [packages] [flags] [-- test flags]
 ```
 
 ### Examples
@@ -62,6 +63,12 @@ gox run ./cmd/app                                     # run specific package
 gox run . -- --config app.json                        # pass arguments to program
 gox run -I/usr/include -lssl .                        # run with C libraries
 gox run -v .                                          # verbose output
+
+# run tests with CGO support
+gox test ./...                                        # test all packages
+gox test ./pkg/mylib                                  # test specific package
+gox test . -- -v -run TestFoo                         # pass test flags
+gox test -I/usr/include -lssl ./...                   # test with C libraries
 ```
 
 See examples in the [example](./example) directory.
@@ -213,6 +220,27 @@ Compile and run a Go package with CGO support. Uses `go run` internally with Zig
 | `--verbose` | `-v` | Print detailed build information |
 
 **Note:** Cross-compilation is not supported for `run`. The target must match the current platform.
+
+### `gox test`
+
+Run tests for Go packages with CGO support. Uses `go test` internally with Zig as the C/C++ toolchain, leveraging Go's build cache for faster repeated test runs.
+
+| Flag | Short | Description |
+| :--- | :---: | :--- |
+| `--config` | `-c` | Config file path (default: `gox.toml`) |
+| `--target` | `-t` | Target name from config (must match current platform) |
+| `--zig-version` | | Zig compiler version (default: `master`) |
+| `--linkmode` | | Link mode: `auto`, `static`, `dynamic` |
+| `--include` | `-I` | C header include directories |
+| `--lib` | `-L` | Library search directories |
+| `--link` | `-l` | Libraries to link |
+| `--pkg` | | Pre-built packages to download |
+| `--flags` | | Additional flags passed to `go test` |
+| `--verbose` | `-v` | Print detailed build information |
+
+Arguments after `--` are passed directly to the test binary (e.g., `-run`, `-bench`, `-cover`).
+
+**Note:** Cross-platform testing is not supported. The target must match the current platform.
 
 ### `gox pkg`
 

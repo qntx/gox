@@ -84,6 +84,35 @@ func (b *Builder) GoRun(ctx context.Context, pkgs []string, progArgs []string) e
 	return nil
 }
 
+// GoTest runs tests using `go test` with Zig as the C toolchain.
+// This leverages Go's build cache for faster repeated test runs.
+func (b *Builder) GoTest(ctx context.Context, pkgs []string, testArgs []string) error {
+	if err := b.setupPackages(ctx); err != nil {
+		return fmt.Errorf("packages: %w", err)
+	}
+
+	env := b.buildEnv()
+	args := b.testArgs(pkgs, testArgs)
+
+	if b.opts.Verbose {
+		b.logBuild(env, args)
+	}
+
+	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd.Env = append(os.Environ(), env...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = b.stdout
+	cmd.Stderr = b.stderr
+
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		return err
+	}
+	return nil
+}
+
 func (b *Builder) setupPackages(ctx context.Context) error {
 	if len(b.opts.Packages) == 0 {
 		return nil
@@ -237,6 +266,23 @@ func (b *Builder) runArgs(pkgs []string, progArgs []string) []string {
 	}
 	if len(progArgs) > 0 {
 		args = append(args, progArgs...)
+	}
+	return args
+}
+
+func (b *Builder) testArgs(pkgs []string, testArgs []string) []string {
+	args := []string{"test"}
+	if flags := b.goLDFlags(); flags != "" {
+		args = append(args, "-ldflags="+flags)
+	}
+	args = append(args, b.opts.BuildFlags...)
+	if len(pkgs) == 0 {
+		args = append(args, ".")
+	} else {
+		args = append(args, pkgs...)
+	}
+	if len(testArgs) > 0 {
+		args = append(args, testArgs...)
 	}
 	return args
 }
