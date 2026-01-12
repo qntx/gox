@@ -28,10 +28,12 @@ Build for any OS/arch from any host without complex toolchain setup.
 ` + styleMuted.Render("Quick Start:") + `
   gox build                    Build for current platform
   gox build -t linux/amd64     Build for Linux x64
+  gox run .                    Compile and run current package
   gox zig update               Install/update Zig compiler
 
 ` + styleMuted.Render("More Info:") + `
   gox build --help             Show build options
+  gox run --help               Show run options
   gox pkg list                 List cached packages`,
 }
 
