@@ -113,6 +113,34 @@ func (b *Builder) GoTest(ctx context.Context, pkgs []string, testArgs []string) 
 	return nil
 }
 
+// GoInstall compiles and installs packages using `go install` with Zig as the C toolchain.
+func (b *Builder) GoInstall(ctx context.Context, pkgs []string) error {
+	if err := b.setupPackages(ctx); err != nil {
+		return fmt.Errorf("packages: %w", err)
+	}
+
+	env := b.buildEnv()
+	args := b.installArgs(pkgs)
+
+	if b.opts.Verbose {
+		b.logBuild(env, args)
+	}
+
+	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd.Env = append(os.Environ(), env...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = b.stdout
+	cmd.Stderr = b.stderr
+
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		return err
+	}
+	return nil
+}
+
 func (b *Builder) setupPackages(ctx context.Context) error {
 	if len(b.opts.Packages) == 0 {
 		return nil
@@ -283,6 +311,20 @@ func (b *Builder) testArgs(pkgs []string, testArgs []string) []string {
 	}
 	if len(testArgs) > 0 {
 		args = append(args, testArgs...)
+	}
+	return args
+}
+
+func (b *Builder) installArgs(pkgs []string) []string {
+	args := []string{"install"}
+	if flags := b.goLDFlags(); flags != "" {
+		args = append(args, "-ldflags="+flags)
+	}
+	args = append(args, b.opts.BuildFlags...)
+	if len(pkgs) == 0 {
+		args = append(args, ".")
+	} else {
+		args = append(args, pkgs...)
 	}
 	return args
 }

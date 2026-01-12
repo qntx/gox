@@ -25,6 +25,7 @@ go install github.com/qntx/gox/cmd/gox@latest
 gox build [packages] [flags]
 gox run [package] [flags] [-- arguments...]
 gox test [packages] [flags] [-- test flags]
+gox install [packages] [flags]
 ```
 
 ### Examples
@@ -69,6 +70,11 @@ gox test ./...                                        # test all packages
 gox test ./pkg/mylib                                  # test specific package
 gox test . -- -v -run TestFoo                         # pass test flags
 gox test -I/usr/include -lssl ./...                   # test with C libraries
+
+# install to $GOPATH/bin
+gox install .                                         # install current module
+gox install ./cmd/myapp                               # install specific command
+gox install -s .                                      # install with stripped symbols
 ```
 
 See examples in the [example](./example) directory.
@@ -241,6 +247,26 @@ Run tests for Go packages with CGO support. Uses `go test` internally with Zig a
 Arguments after `--` are passed directly to the test binary (e.g., `-run`, `-bench`, `-cover`).
 
 **Note:** Cross-platform testing is not supported. The target must match the current platform.
+
+### `gox install`
+
+Compile and install packages to `$GOBIN` (defaults to `$GOPATH/bin`) with CGO support. Uses `go install` internally with Zig as the C/C++ toolchain.
+
+| Flag | Short | Description |
+| :--- | :---: | :--- |
+| `--config` | `-c` | Config file path (default: `gox.toml`) |
+| `--target` | `-t` | Target name from config (must match current platform) |
+| `--zig-version` | | Zig compiler version (default: `master`) |
+| `--linkmode` | | Link mode: `auto`, `static`, `dynamic` |
+| `--include` | `-I` | C header include directories |
+| `--lib` | `-L` | Library search directories |
+| `--link` | `-l` | Libraries to link |
+| `--pkg` | | Pre-built packages to download |
+| `--flags` | | Additional flags passed to `go install` |
+| `--strip` | `-s` | Strip symbols (`-ldflags="-s -w"`) |
+| `--verbose` | `-v` | Print detailed build information |
+
+**Note:** Cross-platform installation is not supported. The target must match the current platform.
 
 ### `gox pkg`
 
