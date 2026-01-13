@@ -40,17 +40,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: "stable"
-
-      - name: Build gox
-        run: go build -o gox ./cmd/gox/
+      - name: Setup gox
+        uses: qntx/setup-gox@v1
 
       - name: Cross-compile example/minimal
         run: |
-          ./gox build --os ${{ matrix.target.os }} --arch ${{ matrix.target.arch }} -v -o minimal-${{ matrix.target.os }}-${{ matrix.target.arch }} ./example/minimal
+          gox build --os ${{ matrix.target.os }} --arch ${{ matrix.target.arch }} -v -o minimal-${{ matrix.target.os }}-${{ matrix.target.arch }} ./example/minimal
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
